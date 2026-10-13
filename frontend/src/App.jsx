@@ -191,10 +191,7 @@ function matchLevel(score) {
   return { label: 'Partial match', tone: 'low' }
 }
 
-function EvidencePanel({ message, activeCite }) {
-  useEffect(() => {
-    if (activeCite) document.getElementById(`ep-${activeCite}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [activeCite, message])
+function EvidencePanel({ message }) {
   const citations = message?.citations || []
   if (!citations.length) {
     return <aside className="evidence-panel" aria-label="Evidence">
@@ -202,7 +199,7 @@ function EvidencePanel({ message, activeCite }) {
       <div className="ep-empty">
         <span className="ep-empty-icon"><Icon name="shield" size={26} /></span>
         <strong>Every answer shows its sources</strong>
-        <p>Ask a question, then select a citation to read the exact passage behind it.</p>
+        <p>Your documents are indexed. Ask a question and the exact passages behind each answer will appear here.</p>
         <ol className="ep-steps">
           <li><b>1</b><div><strong>Retrieve</strong><span>Find the passages closest to your question</span></div></li>
           <li><b>2</b><div><strong>Filter</strong><span>Drop weak matches, or say "not found"</span></div></li>
@@ -218,7 +215,7 @@ function EvidencePanel({ message, activeCite }) {
     <div className="ep-list">{citations.map((citation, index) => {
       const n = citation.index || index + 1
       const pct = citation.score == null ? null : Math.round(Number(citation.score) * 100)
-      return <article className={`ep-card ${String(n) === String(activeCite) ? 'is-active' : ''}`} id={`ep-${n}`} key={`${citation.source}-${n}`}>
+      return <article className="ep-card" id={`ep-${n}`} key={`${citation.source}-${n}`}>
         <header><span className="citation-index">[{n}]</span><strong title={citation.source}>{citation.source}</strong></header>
         <div className="ep-meta"><span>{citation.page ? `Page ${citation.page}` : citation.section || 'Document'}</span>{pct != null && <span>{pct}% match</span>}</div>
         {pct != null && <div className="ep-meter" role="img" aria-label={`${pct}% match`}><span style={{ width: `${Math.max(4, Math.min(100, pct))}%` }} /></div>}
@@ -229,10 +226,10 @@ function EvidencePanel({ message, activeCite }) {
   </aside>
 }
 
-function Message({ message, id, focused, onFocus }) {
+function Message({ message, id }) {
   const isUser = message.role === 'user'
   const level = matchLevel(message.metrics?.top_score)
-  return <article className={`message ${isUser ? 'message-user' : 'message-assistant'} ${focused ? 'is-focused' : ''}`}><div className="message-meta"><span className={`avatar ${isUser ? 'avatar-user' : 'avatar-assistant'}`}>{isUser ? 'YOU' : 'LU'}</span><strong>{isUser ? 'You' : 'Lumen'}</strong><span className="message-time">{message.time || 'now'}</span>{message.demo && <span className="demo-answer-label">DEMO ANSWER</span>}</div><div className="message-body">{isUser ? message.content.split('\n').map((line, index) => <p key={`${line}-${index}`}>{line || '\u00a0'}</p>) : <AnswerText text={message.content} onCite={(n) => { onFocus?.(id, n); openCitation(`cite-${id}-${n}`) }} />}</div>{!isUser && message.citations?.length > 0 && <div className="answer-foot"><span className={`match-pill tone-${level.tone}`}>{level.label}</span><button type="button" className="inspect-btn" onClick={() => onFocus?.(id, null)}>Inspect {message.citations.length} {message.citations.length === 1 ? 'source' : 'sources'}<Icon name="chevron" size={16} /></button></div>}{!isUser && message.citations?.length > 0 && <div className="evidence-block"><div className="evidence-heading"><span><span className="evidence-bar" />Grounded evidence</span><span>{message.citations.length} sources</span></div><div className="citation-list">{message.citations.map((citation, index) => <CitationCard anchor={`cite-${id}-${citation.index || index + 1}`} citation={{ ...citation, index: citation.index || index + 1 }} key={`${citation.source}-${citation.page || citation.section || index}`} />)}</div>{message.metrics && <div className="metrics-row"><span><b>{message.metrics.used_chunks ?? message.metrics.used ?? 0}</b> chunks used</span><span><b>{message.metrics.top_score == null ? '—' : `${Math.round(Number(message.metrics.top_score) * 100)}%`}</b> top score</span><span><b>{message.metrics.context_chars ?? 0}</b> context chars</span></div>}</div>}</article>
+  return <article className={`message ${isUser ? 'message-user' : 'message-assistant'}`}><div className="message-meta"><span className={`avatar ${isUser ? 'avatar-user' : 'avatar-assistant'}`}>{isUser ? 'YOU' : 'LU'}</span><strong>{isUser ? 'You' : 'Lumen'}</strong><span className="message-time">{message.time || 'now'}</span>{message.demo && <span className="demo-answer-label">DEMO ANSWER</span>}</div><div className="message-body">{isUser ? message.content.split('\n').map((line, index) => <p key={`${line}-${index}`}>{line || '\u00a0'}</p>) : <AnswerText text={message.content} onCite={(n) => openCitation(`cite-${id}-${n}`)} />}</div>{!isUser && message.citations?.length > 0 && <div className="answer-foot"><span className={`match-pill tone-${level.tone}`}>{level.label}</span><span className="answer-count">{message.citations.length} {message.citations.length === 1 ? 'source' : 'sources'}</span></div>}{!isUser && message.citations?.length > 0 && <div className="evidence-block"><div className="evidence-heading"><span><span className="evidence-bar" />Grounded evidence</span><span>{message.citations.length} sources</span></div><div className="citation-list">{message.citations.map((citation, index) => <CitationCard anchor={`cite-${id}-${citation.index || index + 1}`} citation={{ ...citation, index: citation.index || index + 1 }} key={`${citation.source}-${citation.page || citation.section || index}`} />)}</div>{message.metrics && <div className="metrics-row"><span><b>{message.metrics.used_chunks ?? message.metrics.used ?? 0}</b> chunks used</span><span><b>{message.metrics.top_score == null ? '—' : `${Math.round(Number(message.metrics.top_score) * 100)}%`}</b> top score</span><span><b>{message.metrics.context_chars ?? 0}</b> context chars</span></div>}</div>}</article>
 }
 
 function App() {
@@ -247,12 +244,12 @@ function App() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const endRef = useRef(null)
   const taRef = useRef(null)
-  const [focus, setFocus] = useState({ index: null, cite: null })
 
   const isDemo = status === 'demo'
   const hasMessages = messages.length > 0
   const history = useMemo(() => messages.map((message) => ({ role: message.role, content: message.content })), [messages])
-  const evidenceMessage = focus.index != null ? messages[focus.index] : [...messages].reverse().find((item) => item.role === 'assistant' && item.citations?.length)
+  const evidenceMessage = [...messages].reverse().find((item) => item.role === 'assistant' && item.citations?.length)
+  const showEvidence = documents.length > 0 || evidenceMessage != null
 
   const applyLibrary = (payload) => {
     const nextDocuments = (payload?.documents || []).map(normalizeDocument)
@@ -322,7 +319,6 @@ function App() {
     try {
       const response = isDemo ? await new Promise((resolve) => setTimeout(() => resolve(demoResponse(trimmed)), 750)) : await sendChat(trimmed, history)
       setMessages((current) => [...current, { role: 'assistant', content: response.answer || 'I could not generate an answer.', citations: response.citations || response.sources || [], metrics: response.metrics || {}, demo: isDemo, time: nowLabel() }])
-      setFocus({ index: null, cite: null })
     } catch (chatError) {
       setError(chatError.message || 'The retrieval service could not answer. Try again.')
     } finally {
@@ -337,22 +333,22 @@ function App() {
     }
   }
 
-  return <div className="app-shell">
+  return <div className={`app-shell${showEvidence ? ' with-evidence' : ''}`}>
     <LibrarySidebar documents={documents} chunks={chunks} status={status} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
     <main className="chat-workspace">
-      <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong>Ask Lumen</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Retrieval ready'}</span><button type="button" className="new-chat" onClick={() => { setMessages([]); setError(''); setFocus({ index: null, cite: null }) }}><Icon name="plus" size={20} /> New thread</button></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong>Ask Lumen</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Retrieval ready'}</span><button type="button" className="new-chat" onClick={() => { setMessages([]); setError('') }}><Icon name="plus" size={20} /> New thread</button></div></header>
       <div className="chat-content">
         <section className={`thread ${hasMessages ? 'has-messages' : ''}`} role="log" aria-label="Chat thread">
           {!hasMessages && status !== 'checking' && <Welcome onPrompt={(prompt) => ask(prompt)} docCount={documents.length} starters={buildStarters(documents, isDemo)} />}
           {status === 'checking' && <div className="checking-state"><span className="loader-ring" /><p>Connecting to your retrieval index…</p></div>}
-          {messages.map((message, index) => <Message message={message} id={index} focused={message === evidenceMessage} onFocus={(i, c) => setFocus({ index: i, cite: c })} key={`${message.role}-${index}`} />)}
+          {messages.map((message, index) => <Message message={message} id={index} key={`${message.role}-${index}`} />)}
           {isLoading && <div className="message message-assistant loading-message"><div className="message-meta"><span className="avatar avatar-assistant">LU</span><strong>Lumen</strong><span className="message-time">retrieving</span></div><div className="loading-bubble"><span /><span /><span /><em>Finding grounded passages…</em></div></div>}
           <div ref={endRef} className="thread-end" />
         </section>
         <div className="composer-area"><div className="composer-context"><span><Icon name="book" size={20} /> Searching {documents.length} {documents.length === 1 ? 'document' : 'documents'}</span><span className="context-divider" /><span><Icon name="check" size={18} /> Answers cite your sources</span></div>{error && (() => { const friendly = friendlyError(error); return <div className="error-state" role="alert"><span className="error-icon"><Icon name="alert" size={26} /></span><div className="error-copy"><strong>{friendly.title}</strong><p>{friendly.body}</p></div><button type="button" onClick={() => setError('')} aria-label="Dismiss error">×</button></div> })()}<form className="composer" onSubmit={(event) => { event.preventDefault(); ask() }}><textarea ref={taRef} value={question} onChange={(event) => { setQuestion(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 168)}px` }} onKeyDown={handleComposerKeyDown} placeholder="Ask anything about your library…" aria-label="Ask a question about your documents" rows="1" disabled={status === 'checking'} /><div className="composer-footer"><label className="attach-button" title="Upload documents"><input type="file" multiple accept={ACCEPTED_FORMATS} onChange={(event) => { if (event.target.files?.length) handleUpload(Array.from(event.target.files)) }} /><Icon name="plus" size={22} /><span>Source</span></label><span className="keyboard-hint"><kbd>shift</kbd> + <kbd>enter</kbd> for a new line</span><button className="send-button" type="submit" disabled={!question.trim() || isLoading || status === 'checking'} aria-label="Send question"><Icon name="send" size={24} /></button></div></form><p className="composer-note">Lumen can make mistakes. Verify important details against the cited passages.</p></div>
       </div>
     </main>
-    <EvidencePanel message={evidenceMessage} activeCite={focus.cite} />
+    {showEvidence && <EvidencePanel message={evidenceMessage} />}
   </div>
 }
 
