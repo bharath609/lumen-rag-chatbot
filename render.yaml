@@ -20,7 +20,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: RAG_CORS_ORIGINS
-        value: https://REPLACE-WITH-YOUR-SITE.github.io
+        value: https://bharath609.github.io
       - key: SEED_DIR
         value: data/sample
       - key: TOP_K
