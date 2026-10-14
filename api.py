@@ -195,7 +195,13 @@ def _get_store() -> VectorStore:
     global _store, _store_key
     key = (str(settings.persist_dir), settings.collection, settings.embedding_model)
     if _store is None or _store_key != key:
-        _store = VectorStore(settings.persist_dir, settings.collection, settings.embedding_model)
+        _store = VectorStore(
+            settings.persist_dir,
+            settings.collection,
+            settings.embedding_model,
+            settings.embedding_provider,
+            settings.hf_api_token,
+        )
         _store_key = key
     return _store
 
@@ -373,6 +379,7 @@ def health() -> dict[str, Any]:
         "chunks": sum(_record_chunk_count(item) for item in records),
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
+        "embedding_provider": settings.embedding_provider,
     }
 
 

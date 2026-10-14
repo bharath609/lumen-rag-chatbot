@@ -16,6 +16,8 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "llama3.2:3b")
     ollama_host: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "local")  # local | hf
+    hf_api_token: str = os.getenv("HF_API_TOKEN", "")
     chunk_size: int = int(os.getenv("CHUNK_SIZE", "800"))
     chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "150"))
     top_k: int = int(os.getenv("TOP_K", "4"))

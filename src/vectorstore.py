@@ -16,7 +16,14 @@ class VectorStore:
     process that has not yet asked a question or indexed a file.
     """
 
-    def __init__(self, persist_dir: Path, collection: str, embedding_model: str):
+    def __init__(
+        self,
+        persist_dir: Path,
+        collection: str,
+        embedding_model: str,
+        embedding_provider: str | None = None,
+        hf_api_token: str | None = None,
+    ):
         try:
             import chromadb
         except ImportError as exc:  # pragma: no cover - dependency environment
@@ -25,10 +32,20 @@ class VectorStore:
                 "pip install -r requirements.txt"
             ) from exc
 
+        import os as _os
+
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
         self.collection_name = collection
         self.embedding_model_name = embedding_model
+        self.embedding_provider = (
+            embedding_provider or _os.getenv("EMBEDDING_PROVIDER", "local")
+        ).lower()
+        self.hf_api_token = (
+            hf_api_token
+            if hf_api_token is not None
+            else _os.getenv("HF_API_TOKEN", "")
+        )
         self.client = chromadb.PersistentClient(path=str(self.persist_dir))
         self.col = self.client.get_or_create_collection(
             name=collection, metadata={"hnsw:space": "cosine"}
@@ -51,7 +68,58 @@ class VectorStore:
     def _embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        if self.embedding_provider == "hf":
+            return self._embed_hf(texts)
         return self._ensure_model().encode(texts, normalize_embeddings=True).tolist()
+
+    def _embed_hf(self, texts: list[str]) -> list[list[float]]:
+        """Embed via the Hugging Face Inference API (no local torch needed)."""
+        import time
+
+        import requests
+
+        if not self.hf_api_token:
+            raise RuntimeError(
+                "HF_API_TOKEN is not set. Get a free token at "
+                "https://huggingface.co/settings/tokens and set HF_API_TOKEN, "
+                "or use EMBEDDING_PROVIDER=local."
+            )
+        url = (
+            "https://api-inference.huggingface.co/models/"
+            f"{self.embedding_model_name}"
+        )
+        headers = {"Authorization": f"Bearer {self.hf_api_token}"}
+        last_error = ""
+        for attempt in range(4):
+            try:
+                resp = requests.post(
+                    url, headers=headers, json={"inputs": texts}, timeout=120
+                )
+            except requests.exceptions.ConnectionError as exc:
+                raise ConnectionError(
+                    "Could not reach the Hugging Face Inference API."
+                ) from exc
+            except requests.exceptions.Timeout as exc:
+                raise TimeoutError("The embedding API timed out. Please retry.") from exc
+            if resp.status_code == 503:  # model cold-start: wait and retry
+                try:
+                    wait = float(resp.json().get("estimated_time", 20))
+                except Exception:
+                    wait = 20
+                time.sleep(min(wait, 60))
+                last_error = "model loading"
+                continue
+            if resp.status_code in (400, 401, 403, 404):
+                raise RuntimeError(
+                    f"Embedding API error (HTTP {resp.status_code}): {resp.text[:200]}"
+                )
+            resp.raise_for_status()
+            data = resp.json()
+            vectors = data if isinstance(data, list) else data.get("embeddings", data)
+            return [[float(value) for value in row] for row in vectors]
+        raise RuntimeError(
+            f"Embedding model still loading after retries ({last_error}). Please retry."
+        )
 
     @staticmethod
     def _id(chunk: dict[str, Any]) -> str:
