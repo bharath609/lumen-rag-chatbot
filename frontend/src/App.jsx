@@ -249,7 +249,7 @@ function App() {
   const hasMessages = messages.length > 0
   const history = useMemo(() => messages.map((message) => ({ role: message.role, content: message.content })), [messages])
   const evidenceMessage = [...messages].reverse().find((item) => item.role === 'assistant' && item.citations?.length)
-  const showEvidence = documents.length > 0 || evidenceMessage != null
+  const showEvidence = evidenceMessage != null
 
   const applyLibrary = (payload) => {
     const nextDocuments = (payload?.documents || []).map(normalizeDocument)
