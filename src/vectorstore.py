@@ -85,7 +85,7 @@ class VectorStore:
                 "or use EMBEDDING_PROVIDER=local."
             )
         url = (
-            "https://api-inference.huggingface.co/models/"
+            "https://router.huggingface.co/hf-inference/models/"
             f"{self.embedding_model_name}"
         )
         headers = {"Authorization": f"Bearer {self.hf_api_token}"}
