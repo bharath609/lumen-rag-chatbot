@@ -86,8 +86,8 @@ class VectorStore:
                 "GEMINI_API_KEY is not set. Get a free key at "
                 "https://aistudio.google.com/apikey and set GEMINI_API_KEY."
             )
-        model = _os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
-        url = "https://generativelanguage.googleapis.com/v1beta/models:batchEmbedContents"
+        model = _os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents"
         body = {
             "requests": [
                 {
