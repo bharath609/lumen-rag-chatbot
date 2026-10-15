@@ -404,7 +404,14 @@ async def upload_documents(files: list[UploadFile] = File(...)) -> dict[str, Any
     for upload in files:
         try:
             indexed.append(await _index_upload(upload, registry))
-        except (LoaderDependencyError, OSError, RuntimeError, ValueError) as exc:
+        except (
+            LoaderDependencyError,
+            ConnectionError,
+            TimeoutError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as exc:
             errors.append(
                 {
                     "source": sanitize_filename(upload.filename),
