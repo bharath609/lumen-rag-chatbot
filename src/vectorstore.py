@@ -70,7 +70,58 @@ class VectorStore:
             return []
         if self.embedding_provider == "hf":
             return self._embed_hf(texts)
+        if self.embedding_provider == "gemini":
+            return self._embed_gemini(texts)
         return self._ensure_model().encode(texts, normalize_embeddings=True).tolist()
+
+    def _embed_gemini(self, texts: list[str]) -> list[list[float]]:
+        """Embed via the Google Gemini embedding API (no local torch needed)."""
+        import os as _os
+
+        import requests
+
+        api_key = _os.getenv("GEMINI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. Get a free key at "
+                "https://aistudio.google.com/apikey and set GEMINI_API_KEY."
+            )
+        model = _os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
+        url = "https://generativelanguage.googleapis.com/v1beta/models:batchEmbedContents"
+        body = {
+            "requests": [
+                {
+                    "model": f"models/{model}",
+                    "content": {"parts": [{"text": text}]},
+                }
+                for text in texts
+            ]
+        }
+        try:
+            resp = requests.post(url, params={"key": api_key}, json=body, timeout=120)
+        except requests.exceptions.ConnectionError as exc:
+            raise ConnectionError(
+                "Could not reach the Gemini API. Check network and retry."
+            ) from exc
+        except requests.exceptions.Timeout as exc:
+            raise TimeoutError("The embedding API timed out. Please retry.") from exc
+        if resp.status_code in (400, 401, 403, 404, 429):
+            detail = resp.text[:300]
+            try:
+                detail = resp.json().get("error", {}).get("message", detail)
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"Embedding API error (HTTP {resp.status_code}): {detail}"
+            )
+        resp.raise_for_status()
+        try:
+            embeddings = resp.json()["embeddings"]
+            return [[float(value) for value in item["values"]] for item in embeddings]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "Gemini returned an unexpected embedding shape."
+            ) from exc
 
     def _embed_hf(self, texts: list[str]) -> list[list[float]]:
         """Embed via the Hugging Face Inference API (no local torch needed)."""
