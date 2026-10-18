@@ -88,40 +88,48 @@ class VectorStore:
             )
         model = _os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents"
-        body = {
-            "requests": [
-                {
-                    "model": f"models/{model}",
-                    "content": {"parts": [{"text": text}]},
-                }
-                for text in texts
-            ]
-        }
-        try:
-            resp = requests.post(url, params={"key": api_key}, json=body, timeout=120)
-        except requests.exceptions.ConnectionError as exc:
-            raise ConnectionError(
-                "Could not reach the Gemini API. Check network and retry."
-            ) from exc
-        except requests.exceptions.Timeout as exc:
-            raise TimeoutError("The embedding API timed out. Please retry.") from exc
-        if resp.status_code in (400, 401, 403, 404, 429):
-            detail = resp.text[:300]
+        vectors: list[list[float]] = []
+        # The Gemini batch endpoint accepts at most 100 requests per call,
+        # so large documents are embedded in chunks of 90 for headroom.
+        for start in range(0, len(texts), 90):
+            batch = texts[start : start + 90]
+            body = {
+                "requests": [
+                    {
+                        "model": f"models/{model}",
+                        "content": {"parts": [{"text": text}]},
+                    }
+                    for text in batch
+                ]
+            }
             try:
-                detail = resp.json().get("error", {}).get("message", detail)
-            except Exception:
-                pass
-            raise RuntimeError(
-                f"Embedding API error (HTTP {resp.status_code}): {detail}"
-            )
-        resp.raise_for_status()
-        try:
-            embeddings = resp.json()["embeddings"]
-            return [[float(value) for value in item["values"]] for item in embeddings]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise RuntimeError(
-                "Gemini returned an unexpected embedding shape."
-            ) from exc
+                resp = requests.post(url, params={"key": api_key}, json=body, timeout=120)
+            except requests.exceptions.ConnectionError as exc:
+                raise ConnectionError(
+                    "Could not reach the Gemini API. Check network and retry."
+                ) from exc
+            except requests.exceptions.Timeout as exc:
+                raise TimeoutError("The embedding API timed out. Please retry.") from exc
+            if resp.status_code in (400, 401, 403, 404, 429):
+                detail = resp.text[:300]
+                try:
+                    detail = resp.json().get("error", {}).get("message", detail)
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    f"Embedding API error (HTTP {resp.status_code}): {detail}"
+                )
+            resp.raise_for_status()
+            try:
+                embeddings = resp.json()["embeddings"]
+                vectors.extend(
+                    [float(value) for value in item["values"]] for item in embeddings
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "Gemini returned an unexpected embedding shape."
+                ) from exc
+        return vectors
 
     def _embed_hf(self, texts: list[str]) -> list[list[float]]:
         """Embed via the Hugging Face Inference API (no local torch needed)."""
