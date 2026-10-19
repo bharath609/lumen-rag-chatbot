@@ -145,7 +145,24 @@ function CitationCard({ citation, anchor }) {
   </details>
 }
 
-function LibrarySidebar({ documents, chunks, status, onUpload, onClear, isUploading, mobileOpen, setMobileOpen }) {
+function LibraryRow({ document, excluded, onToggle }) {
+  const isExcluded = excluded
+  return <div className={`document-row ${isExcluded ? 'is-excluded' : ''}`}>
+    <FileIcon type={fileType(document.source)} />
+    <div className="document-info"><strong title={document.source}>{document.source}</strong><span>{document.chunk_count || 0} chunks <i>·</i> {formatBytes(document.size)}</span></div>
+    <button
+      type="button"
+      className={`doc-toggle ${isExcluded ? 'is-off' : 'is-on'}`}
+      onClick={() => onToggle(document.source)}
+      aria-pressed={!isExcluded}
+      title={isExcluded ? 'Use this document for answering' : 'Exclude this document from answering'}
+    >
+      <span className="doc-toggle-knob" />
+    </button>
+  </div>
+}
+
+function LibrarySidebar({ documents, chunks, status, onUpload, onClear, isUploading, mobileOpen, setMobileOpen, excludedDocs, onToggleDoc }) {
   const [dragging, setDragging] = useState(false)
   const handleFiles = (fileList) => {
     const files = Array.from(fileList || [])
@@ -162,7 +179,8 @@ function LibrarySidebar({ documents, chunks, status, onUpload, onClear, isUpload
       <span className="dropzone-icon"><Icon name={isUploading ? 'spark' : 'upload'} size={26} /></span><strong>{isUploading ? 'Indexing documents…' : 'Drop files to index'}</strong><span>{isUploading ? 'Building searchable chunks' : 'or browse from your device'}</span><small>{ACCEPTED_LABEL}</small>
     </label>
     <div className="documents-header"><span>Indexed documents</span><span className="document-rule" /></div>
-    <div className="document-list">{documents.length ? documents.map((document) => <div className="document-row" key={`${document.source}-${document.updated_at || document.created_at || ''}`}><FileIcon type={fileType(document.source)} /><div className="document-info"><strong title={document.source}>{document.source}</strong><span>{document.chunk_count || 0} chunks <i>·</i> {formatBytes(document.size)}</span></div><span className="indexed-dot" title="Indexed" /></div>) : <div className="empty-library"><Icon name="book" size={26} /><p>Your library is ready for its first source.</p></div>}</div>
+    <div className="document-list">{documents.length ? documents.map((document) => <LibraryRow key={`${document.source}-${document.updated_at || document.created_at || ''}`} document={document} excluded={excludedDocs.has(document.source)} onToggle={onToggleDoc} />) : <div className="empty-library"><Icon name="book" size={26} /><p>Your library is ready for its first source.</p></div>}</div>
+    <p className="document-hint"><Icon name="chat" size={16} /> Toggle which documents Lumen uses when answering.</p>
     <button className="clear-button" type="button" onClick={onClear} disabled={!documents.length}><Icon name="trash" size={20} /> Clear library</button>
     <div className="sidebar-footer"><span>GROUNDED · CITED</span><span className="footer-line" /><span>v1.0</span></div>
   </aside>
@@ -241,6 +259,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState('')
+  const [excludedDocs, setExcludedDocs] = useState(() => new Set())
   const [mobileOpen, setMobileOpen] = useState(false)
   const endRef = useRef(null)
   const taRef = useRef(null)
@@ -248,6 +267,9 @@ function App() {
   const isDemo = status === 'demo'
   const hasMessages = messages.length > 0
   const history = useMemo(() => messages.map((message) => ({ role: message.role, content: message.content })), [messages])
+  const activeSources = useMemo(() => (
+    documents.filter((document) => !excludedDocs.has(document.source)).map((document) => document.source)
+  ), [documents, excludedDocs])
   const evidenceMessage = [...messages].reverse().find((item) => item.role === 'assistant' && item.citations?.length)
   const showEvidence = evidenceMessage != null
 
@@ -302,7 +324,11 @@ function App() {
       if (isDemo) {
         setDocuments([])
         setChunks(0)
-      } else applyLibrary(await clearLibrary())
+        setExcludedDocs(new Set())
+      } else {
+        applyLibrary(await clearLibrary())
+        setExcludedDocs(new Set())
+      }
     } catch (clearError) {
       setError(clearError.message || 'Could not clear the library.')
     }
@@ -317,13 +343,22 @@ function App() {
     setMessages((current) => [...current, userMessage])
     setIsLoading(true)
     try {
-      const response = isDemo ? await new Promise((resolve) => setTimeout(() => resolve(demoResponse(trimmed)), 750)) : await sendChat(trimmed, history)
+      const response = isDemo ? await new Promise((resolve) => setTimeout(() => resolve(demoResponse(trimmed)), 750)) : await sendChat(trimmed, history, activeSources.length < documents.length ? activeSources : undefined)
       setMessages((current) => [...current, { role: 'assistant', content: response.answer || 'I could not generate an answer.', citations: response.citations || response.sources || [], metrics: response.metrics || {}, demo: isDemo, time: nowLabel() }])
     } catch (chatError) {
       setError(chatError.message || 'The retrieval service could not answer. Try again.')
     } finally {
       setIsLoading(false)
     }
+  }
+
+  function toggleDocument(source) {
+    setExcludedDocs((current) => {
+      const next = new Set(current)
+      if (next.has(source)) next.delete(source)
+      else next.add(source)
+      return next
+    })
   }
 
   function handleComposerKeyDown(event) {
@@ -334,7 +369,7 @@ function App() {
   }
 
   return <div className={`app-shell${showEvidence ? ' with-evidence' : ''}`}>
-    <LibrarySidebar documents={documents} chunks={chunks} status={status} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+      <LibrarySidebar documents={documents} chunks={chunks} status={status} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} excludedDocs={excludedDocs} onToggleDoc={toggleDocument} />
     <main className="chat-workspace">
       <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong>Ask Lumen</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Retrieval ready'}</span><button type="button" className="new-chat" onClick={() => { setMessages([]); setError('') }}><Icon name="plus" size={20} /> New thread</button></div></header>
       <div className="chat-content">

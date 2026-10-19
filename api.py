@@ -271,6 +271,12 @@ async def _index_upload(upload: UploadFile, registry: LibraryRegistry) -> dict[s
             handle.write(payload)
         pages = load_file(temporary_name, source=source)
         chunks = chunk_pages(pages, settings.chunk_size, settings.chunk_overlap)
+        # File metadata rides on every chunk so the library list can be
+        # rebuilt straight from the persistent index after a host restart.
+        doc_type = _mime_type(source, getattr(upload, "content_type", None))
+        for chunk in chunks:
+            chunk["doc_bytes"] = len(payload)
+            chunk["doc_type"] = doc_type
         store = _get_store()
         replace_source = getattr(store, "replace_source", None)
         if callable(replace_source):
@@ -307,6 +313,44 @@ async def _index_upload(upload: UploadFile, registry: LibraryRegistry) -> dict[s
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1)
     history: list[dict[str, Any]] | None = None
+    sources: list[str] | None = None
+
+
+def _rebuild_registry_from_index(registry: LibraryRegistry) -> None:
+    """Repopulate library.json from the persistent index after a host wipe.
+
+    Ephemeral hosts (Render free tier) lose uploaded files and the registry on
+    every restart, but a cloud-backed vector index survives.  This restores
+    the document list with the metadata each chunk carried (size, type).
+    """
+    store = _get_store()
+    if store.count() == 0:
+        return
+    has_doc_meta = any(
+        record.get("doc_bytes") for record in store.library_records()
+    )
+    if not has_doc_meta:
+        # Index predates per-chunk file metadata; a rebuild would lose data.
+        return
+    now = _utc_now()
+    for record in store.library_records():
+        source = record["source"]
+        extension = Path(source).suffix.lower()
+        registry.upsert(
+            {
+                "source": source,
+                "name": source,
+                "size": record.get("doc_bytes") or 0,
+                "type": record.get("doc_type") or extension,
+                "extension": extension,
+                "chunk_count": record.get("chunk_count", 0),
+                "chunks": record.get("chunk_count", 0),
+                "page_count": record.get("page_count"),
+                "created_at": now,
+                "updated_at": now,
+                "uploaded_at": now,
+            }
+        )
 
 
 def _seed_library_sync() -> None:
@@ -319,13 +363,19 @@ def _seed_library_sync() -> None:
     import asyncio as _asyncio
 
     seed_dir = os.getenv("SEED_DIR", "data/sample")
+    registry = LibraryRegistry()
+    if not registry.read():
+        # A cloud-backed index outlives the host filesystem: recover the
+        # previously uploaded documents instead of treating them as lost.
+        try:
+            _rebuild_registry_from_index(registry)
+        except Exception as exc:
+            log = logging.getLogger("lumen.seed")
+            log.warning("Registry rebuild skipped: %s", exc)
     if not seed_dir:
         return
     path = Path(seed_dir)
     if not path.is_dir():
-        return
-    registry = LibraryRegistry()
-    if registry.read():
         return
     files = [
         item
@@ -437,7 +487,13 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     if not question:
         raise HTTPException(status_code=422, detail="question must not be blank")
     try:
-        result = answer(question, _get_store(), settings, _clean_history(request.history or []))
+        result = answer(
+            question,
+            _get_store(),
+            settings,
+            _clean_history(request.history or []),
+            sources=request.sources,
+        )
     except (ConnectionError, TimeoutError) as exc:
         raise HTTPException(status_code=502, detail=f"LLM offline: {exc}") from exc
     except RuntimeError as exc:

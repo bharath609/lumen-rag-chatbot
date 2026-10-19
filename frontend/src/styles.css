@@ -22,7 +22,15 @@
 .dropzone input{position:absolute;inset:0;opacity:0;cursor:pointer}.dropzone:hover,.dropzone.is-dragging{border-color:var(--lum);background:rgba(255,255,255,.08)}.dropzone.is-uploading{opacity:.75;border-style:solid}
 .dropzone-icon{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;background:var(--side2);color:var(--lum);margin-bottom:4px;border:1px solid var(--sidebd)}.dropzone strong{font-size:14px}.dropzone span{font-size:12.5px;color:var(--sidemut)}.dropzone small{font-size:11px;color:#8e8e8e;margin-top:5px}
 .documents-header{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--sidemut)}.document-rule{flex:1;height:1px;background:var(--sidebd)}
-.document-list{display:flex;flex-direction:column;gap:5px;flex:1;min-height:80px}.document-row{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:11px;border:1px solid transparent;transition:.15s}.document-row:hover{background:rgba(255,255,255,.05);border-color:var(--sidebd)}
+.document-list{display:flex;flex-direction:column;gap:5px;flex:1;min-height:80px}.document-row{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:11px;border:1px solid transparent;transition:.15s}.document-row:hover{background:rgba(255,255,255,.05);border-color:var(--sidebd)}.document-row.is-excluded .document-info{opacity:.45}.document-row.is-excluded strong{text-decoration:line-through;text-decoration-color:rgba(236,236,236,.35)}
+.document-hint{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--sidemut);margin:6px 2px 0}
+.doc-toggle{flex:none;width:34px;height:19px;border-radius:19px;border:1px solid var(--sidebd);background:#2e2e2e;padding:1px;cursor:pointer;transition:.15s;display:grid;align-items:center}
+.doc-toggle.is-on{background:#3ddc97;border-color:#3ddc97}
+.doc-toggle.is-on .doc-toggle-knob{transform:translateX(15px);background:#0a0a0a}
+.doc-toggle.is-off{background:#1b1b1b;border-color:#3a3a3a}
+.doc-toggle.is-off .doc-toggle-knob{transform:translateX(1px);background:#8e8e8e}
+.doc-toggle-knob{width:13px;height:13px;border-radius:50%;background:#ececec;transition:transform .15s;display:block}
+.doc-toggle:hover{border-color:#6a6a6a}
 .document-info{min-width:0;flex:1}.document-info strong{display:block;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.document-info span{font-size:12px;color:var(--sidemut)}.document-info i{font-style:normal;opacity:.5}.indexed-dot{width:7px;height:7px;border-radius:50%;background:#3ddc97}
 .empty-library{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;color:var(--sidemut);padding:18px 8px;font-size:13px;border:1px dashed var(--sidebd);border-radius:var(--r)}.empty-library p{margin:0}
 .clear-button{display:flex;align-items:center;justify-content:center;gap:8px;background:none;border:1px solid var(--sidebd);color:var(--sidemut);border-radius:11px;padding:9px;font-size:13px;font-weight:600}.clear-button:hover:not(:disabled){color:#ff9b8f;border-color:#525252}.clear-button:disabled{opacity:.4;cursor:default}

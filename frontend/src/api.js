@@ -39,10 +39,10 @@ export function uploadDocuments(files) {
   return request('/api/documents', { method: 'POST', body: form })
 }
 
-export function sendChat(question, history) {
+export function sendChat(question, history, sources) {
   return request('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ question, history }),
+    body: JSON.stringify(sources?.length ? { question, history, sources } : { question, history }),
   })
 }
 

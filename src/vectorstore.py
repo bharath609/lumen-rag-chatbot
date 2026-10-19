@@ -46,7 +46,22 @@ class VectorStore:
             if hf_api_token is not None
             else _os.getenv("HF_API_TOKEN", "")
         )
-        self.client = chromadb.PersistentClient(path=str(self.persist_dir))
+        cloud_key = _os.getenv("CHROMA_API_KEY", "")
+        cloud_tenant = _os.getenv("CHROMA_TENANT", "")
+        cloud_database = _os.getenv("CHROMA_DATABASE", "")
+        if cloud_key and cloud_tenant and cloud_database and hasattr(
+            chromadb, "CloudClient"
+        ):
+            # Persistent Chroma Cloud database: the index survives restarts of
+            # ephemeral hosts (Render free tier) that would wipe local storage.
+            self.persist_dir.mkdir(parents=True, exist_ok=True)
+            self.client = chromadb.CloudClient(
+                api_key=cloud_key,
+                tenant=cloud_tenant,
+                database=cloud_database,
+            )
+        else:
+            self.client = chromadb.PersistentClient(path=str(self.persist_dir))
         self.col = self.client.get_or_create_collection(
             name=collection, metadata={"hnsw:space": "cosine"}
         )
@@ -199,6 +214,12 @@ class VectorStore:
         }
         if chunk.get("section"):
             metadata["section"] = str(chunk["section"])
+        # File metadata rides on every chunk so the library registry can be
+        # rebuilt from the index itself (used when a host's disk is wiped).
+        if chunk.get("doc_bytes"):
+            metadata["doc_bytes"] = int(chunk["doc_bytes"])
+        if chunk.get("doc_type"):
+            metadata["doc_type"] = str(chunk["doc_type"])
         return metadata
 
     def delete_source(self, source: str) -> None:
@@ -241,12 +262,19 @@ class VectorStore:
             return 0
         return self.add(normalized, replace=True)
 
-    def query(self, question: str, k: int = 4) -> list[dict]:
+    def query(
+        self, question: str, k: int = 4, sources: list[str] | None = None
+    ) -> list[dict]:
         count = self.col.count()
         if count == 0 or k <= 0:
             return []
+        where = None
+        if sources:  # restrict retrieval to specific documents
+            where = {"source": {"$in": sorted(set(sources))}}
         result = self.col.query(
-            query_embeddings=self._embed([question]), n_results=min(k, count)
+            query_embeddings=self._embed([question]),
+            n_results=min(k, count),
+            where=where,
         )
         documents = (result.get("documents") or [[]])[0]
         metadatas = (result.get("metadatas") or [[]])[0]
@@ -273,6 +301,37 @@ class VectorStore:
             return []
         metadatas = self.col.get(include=["metadatas"]).get("metadatas") or []
         return sorted({str(meta.get("source")) for meta in metadatas if meta and meta.get("source")})
+
+    def library_records(self) -> list[dict[str, Any]]:
+        """Describe every indexed source using only what the index stores.
+
+        Used to rebuild the library registry after an ephemeral host wipes the
+        local filesystem: the cloud index is the durable source of truth.
+        """
+        if self.col.count() == 0:
+            return []
+        metadatas = self.col.get(include=["metadatas"]).get("metadatas") or []
+        grouped: dict[str, dict[str, Any]] = {}
+        for meta in metadatas:
+            if not isinstance(meta, dict) or not meta.get("source"):
+                continue
+            source = str(meta["source"])
+            record = grouped.setdefault(
+                source,
+                {
+                    "source": source,
+                    "chunk_count": 0,
+                    "page_count": 0,
+                    "doc_bytes": 0,
+                    "doc_type": "",
+                },
+            )
+            record["chunk_count"] += 1
+            page = int(meta.get("page") or 0)
+            record["page_count"] = max(record["page_count"], page)
+            record["doc_bytes"] = record["doc_bytes"] or int(meta.get("doc_bytes") or 0)
+            record["doc_type"] = record["doc_type"] or str(meta.get("doc_type") or "")
+        return [grouped[source] for source in sorted(grouped)]
 
     def count(self) -> int:
         """Return the number of indexed chunks without loading embeddings."""

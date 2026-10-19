@@ -5,8 +5,10 @@ from src.rag import NO_ANSWER, answer
 class FakeStore:
     def __init__(self, hits):
         self.hits = hits
+        self.last_sources = None
 
-    def query(self, q, k):
+    def query(self, q, k, sources=None):
+        self.last_sources = sources
         return self.hits
 
 
@@ -38,3 +40,12 @@ def test_good_hit_returns_answer_and_sources():
     assert r["citations"][0]["page"] == 2
     assert r["metrics"]["used_chunks"] == 1
     assert r["metrics"]["top_score"] == 0.9
+
+
+def test_sources_filter_passed_to_store():
+    store = FakeStore([{"text": "x", "source": "a.txt", "page": None, "score": 0.9}])
+    answer("q", store, S, llm_fn=fake_llm, sources=["a.txt"])
+    assert store.last_sources == ["a.txt"]
+    store = FakeStore([{"text": "x", "source": "a.txt", "page": None, "score": 0.9}])
+    answer("q", store, S, llm_fn=fake_llm)
+    assert store.last_sources is None

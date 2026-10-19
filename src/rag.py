@@ -80,13 +80,15 @@ def answer(
     s: Settings,
     history: list[dict] | None = None,
     llm_fn: Callable[..., str] = generate,
+    sources: list[str] | None = None,
 ) -> dict[str, Any]:
     """Return answer text plus source hits, citations, and retrieval metrics.
 
     Chunks scoring below ``MIN_SCORE`` are dropped; if nothing remains we skip
     the LLM entirely, which reduces hallucination on out-of-scope questions.
+    ``sources`` optionally restricts retrieval to those documents.
     """
-    retrieved = list(store.query(question, s.top_k) or [])
+    retrieved = list(store.query(question, s.top_k, sources) or [])
     hits = [
         hit
         for hit in retrieved
