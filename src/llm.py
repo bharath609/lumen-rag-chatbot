@@ -64,7 +64,10 @@ def generate(system: str, messages: list[dict], s: Settings) -> str:
     if s.llm_provider == "gemini":
         return _generate_gemini(system, messages, s)
 
-    raise ValueError(f"Unknown LLM_PROVIDER: {s.llm_provider}")
+    raise RuntimeError(
+        f"Unknown LLM_PROVIDER: '{s.llm_provider}'. "
+        "Valid values: ollama | anthropic | gemini."
+    )
 
 
 def _generate_gemini(system: str, messages: list[dict], s: Settings) -> str:
