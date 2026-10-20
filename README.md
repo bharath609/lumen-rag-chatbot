@@ -28,6 +28,35 @@ Why each piece:
 - **Transparent evidence** exposes the retrieved excerpts, source location, score,
   and context metrics behind each response.
 - **A pluggable LLM** supports local Ollama by default and optional Anthropic API use.
+
+## What makes Lumen different
+
+Most RAG products (including NotebookLM) stop at "retrieve, answer, cite."
+Lumen closes the trust loop with three mechanisms that show the system's own
+reasoning — designed to be defensible in an engineering interview:
+
+1. **Claim-level self-verification.** After an answer is generated, a second
+   LLM pass decomposes it into factual claims and checks each one for
+   entailment against the cited passages (the pattern behind RAGAS-style
+   faithfulness evals). Unsupported claims are flagged in the UI ("2 claims
+   unverified") instead of silently presented as fact. Fail-open by design:
+   if the verifier errors, the answer still returns and is never blocked.
+2. **Retrieval receipts.** The evidence panel proves what was considered and
+   consciously discarded: every chunk retrieved, kept, or dropped below the
+   relevance gate — with scores. RAG systems that only show what they used
+   are hiding the other half of the decision.
+3. **Per-document steering.** The library sidebar exposes a toggle per
+   document: include or exclude any source from answering at any time,
+   without deleting or re-uploading anything. Retrieval is filtered by the
+   selection server-side (`where source IN ...`).
+4. **Suggested follow-ups.** Each answer generates three grounded next
+   questions from the same context — chaining deeper into the document set
+   instead of leaving the user stranded after one answer.
+
+The pipeline also ships the fundamentals interviewers probe: structure-aware
+chunking with overlap, a relevance gate that skips generation on thin
+retrieval, ephemeral-safe registry rebuilds from the index, sanitized
+uploads, and a fully offline local default (Ollama + local embeddings).
 - **A safe local API** binds to loopback by default and only accepts loopback browser
   origins through CORS.
 
