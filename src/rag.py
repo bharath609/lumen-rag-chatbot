@@ -58,6 +58,23 @@ def _metrics(
     llm_called: bool,
 ) -> dict[str, Any]:
     scores = [float(hit["score"]) for hit in retrieved if hit.get("score") is not None]
+    dropped = [
+        hit
+        for hit in retrieved
+        if hit.get("score") is None
+        or float(hit["score"]) < settings.min_score
+    ]
+    # Retrieval receipts: prove what was considered and consciously dropped.
+    dropped_receipts = [
+        {
+            "source": hit.get("source"),
+            "page": hit.get("page"),
+            "score": round(float(hit["score"]), 3)
+            if hit.get("score") is not None
+            else None,
+        }
+        for hit in dropped[:6]
+    ]
     return {
         # The explicit names are useful to a React client; the *_count aliases
         # make the payload self-describing in logs and API consumers.
@@ -67,6 +84,8 @@ def _metrics(
         "used": len(used),
         "used_chunks": len(used),
         "context_chunks": len(used),
+        "dropped_chunks": len(dropped),
+        "dropped": dropped_receipts,
         "top_score": max(scores) if scores else None,
         "min_score": settings.min_score,
         "context_chars": sum(len(str(hit.get("text", ""))) for hit in used),

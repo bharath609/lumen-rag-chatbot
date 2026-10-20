@@ -37,6 +37,23 @@
 .sidebar-footer{display:flex;align-items:center;gap:10px;font-size:10px;letter-spacing:.12em;color:#8e8e8e}.footer-line{flex:1;height:1px;background:var(--sidebd)}
 .file-icon{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:#3a3a3a;color:#ececec}.file-icon svg{display:none}.file-icon em{font:800 9.5px/1 var(--ui);font-style:normal;letter-spacing:.05em}
 .file-pdf,.file-csv,.file-xlsx,.file-xls,.file-tsv,.file-docx,.file-doc,.file-pptx,.file-html,.file-json{background:#3a3a3a;color:#ececec}
+.verify-pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;letter-spacing:.02em;padding:3px 10px;border-radius:999px;margin-bottom:10px}
+.verify-pill.is-verified{color:#3ddc97;background:rgba(61,220,151,.09);border:1px solid rgba(61,220,151,.25)}
+.verify-pill.is-flagged{color:#ffb86b;background:rgba(255,184,107,.08);border:1px solid rgba(255,184,107,.3)}
+.answer-receipt{margin-left:auto;font-size:11px;color:var(--sidemut);font-variant-numeric:tabular-nums}
+.followups{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:14px}
+.followups-label{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sidemut)}
+.followup-chip{font:inherit;font-size:12.5px;color:#a3a3a3;background:#161616;border:1px solid #2e2e2e;border-radius:999px;padding:6px 13px;cursor:pointer;transition:.15s;text-align:left}
+.followup-chip:hover{color:#ececec;border-color:#4a4a4a;background:#1f1f1f}
+.ep-flagged{display:flex;gap:10px;background:rgba(255,184,107,.07);border:1px solid rgba(255,184,107,.25);border-radius:12px;padding:11px 13px;margin-bottom:12px}
+.ep-flagged-icon{color:#ffb86b;flex:none;padding-top:2px}
+.ep-flagged strong{font-size:12.5px;color:#ffb86b;display:block;margin-bottom:3px}
+.ep-flagged ul{margin:0;padding-left:16px}
+.ep-flagged li{font-size:12px;color:var(--tx);opacity:.85;margin-bottom:2px}
+.ep-receipt{margin-top:12px;border-top:1px dashed #2e2e2e;padding-top:10px}
+.ep-receipt > span{font-size:9.5px;font-weight:800;letter-spacing:.14em;color:var(--sidemut)}
+.ep-receipt > div{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.ep-receipt-chip{font-size:10.5px;color:#8e8e8e;background:#161616;border:1px solid #262626;border-radius:999px;padding:3px 9px;font-variant-numeric:tabular-nums}
 .citation-card .file-icon{width:30px;height:30px;border-radius:8px;background:var(--acs);color:var(--ac)}.citation-card .file-icon em{font-size:8.5px}
 /* workspace */
 .chat-workspace{display:flex;flex-direction:column;min-width:0;height:100dvh;background:radial-gradient(900px 360px at 50% -140px,rgba(255,255,255,.16),transparent 70%),radial-gradient(700px 380px at 92% 0,rgba(255,255,255,.08),transparent 70%),var(--bg)}

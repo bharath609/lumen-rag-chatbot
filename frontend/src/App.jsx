@@ -228,8 +228,10 @@ function EvidencePanel({ message }) {
   }
   const metrics = message.metrics || {}
   const level = matchLevel(metrics.top_score)
+  const flagged = message.verify?.status === 'flagged'
   return <aside className="evidence-panel" aria-label="Evidence">
     <div className="ep-head"><div><span className="eyebrow">Inspector</span><h2>Evidence</h2></div><span className={`match-pill tone-${level.tone}`}>{level.label}</span></div>
+    {flagged && <div className="ep-flagged"><span className="ep-flagged-icon"><Icon name="alert" size={20} /></span><div><strong>{message.verify.unsupported.length} {(message.verify.unsupported.length === 1) ? 'claim' : 'claims'} could not be verified</strong><ul>{message.verify.unsupported.map((claim) => <li key={claim}>{claim}</li>)}</ul></div></div>}
     <div className="ep-list">{citations.map((citation, index) => {
       const n = citation.index || index + 1
       const pct = citation.score == null ? null : Math.round(Number(citation.score) * 100)
@@ -240,14 +242,76 @@ function EvidencePanel({ message }) {
         <p>{citation.text || citation.excerpt || 'No excerpt supplied.'}</p>
       </article>
     })}</div>
-    <div className="ep-foot"><span><b>{metrics.retrieved_chunks ?? metrics.retrieved ?? 0}</b> retrieved</span><span><b>{metrics.used_chunks ?? metrics.used ?? 0}</b> used</span><span><b>{metrics.context_chars ?? 0}</b> chars</span></div>
+    <div className="ep-foot"><span><b>{metrics.used_chunks ?? metrics.used ?? 0}</b> used</span><span><b>{metrics.dropped_chunks ?? 0}</b> dropped</span><span><b>{metrics.context_chars ?? 0}</b> chars</span></div>
+    {(metrics.dropped || []).length > 0 && <div className="ep-receipt"><span>RETRIEVAL RECEIPTS</span><div>{metrics.dropped.map((drop, i) => <span className="ep-receipt-chip" key={`${drop.source}-${i}`}>{drop.source}{drop.score != null && ` · ${Math.round(drop.score * 100)}%`}</span>)}</div></div>}
   </aside>
 }
 
-function Message({ message, id }) {
+function VerifyPill({ verify }) {
+  if (!verify || verify.status === 'skipped') return null
+  const flagged = verify.status === 'flagged'
+  return <span className={`verify-pill ${flagged ? 'is-flagged' : 'is-verified'}`} title={flagged ? (verify.unsupported || []).join(' · ') : 'Every claim was checked against the cited passages'}>
+    <Icon name={flagged ? 'alert' : 'check'} size={15} />
+    {flagged ? `${(verify.unsupported || []).length} ${(verify.unsupported || []).length === 1 ? 'claim' : 'claims'} unverified` : 'Verified grounded'}
+  </span>
+}
+
+function Followups({ items, onFollowup }) {
+  if (!items?.length) return null
+  return <div className="followups"><span className="followups-label"><Icon name="bolt" size={16} /> Keep digging</span>{items.map((q) => <button type="button" className="followup-chip" key={q} onClick={() => onFollowup(q)}>{q}</button>)}</div>
+}
+
+function Message({ message, id, onFollowup }) {
   const isUser = message.role === 'user'
   const level = matchLevel(message.metrics?.top_score)
-  return <article className={`message ${isUser ? 'message-user' : 'message-assistant'}`}><div className="message-meta"><span className={`avatar ${isUser ? 'avatar-user' : 'avatar-assistant'}`}>{isUser ? 'YOU' : 'LU'}</span><strong>{isUser ? 'You' : 'Lumen'}</strong><span className="message-time">{message.time || 'now'}</span>{message.demo && <span className="demo-answer-label">DEMO ANSWER</span>}</div><div className="message-body">{isUser ? message.content.split('\n').map((line, index) => <p key={`${line}-${index}`}>{line || '\u00a0'}</p>) : <AnswerText text={message.content} onCite={(n) => openCitation(`cite-${id}-${n}`)} />}</div>{!isUser && message.citations?.length > 0 && <div className="answer-foot"><span className={`match-pill tone-${level.tone}`}>{level.label}</span><span className="answer-count">{message.citations.length} {message.citations.length === 1 ? 'source' : 'sources'}</span></div>}{!isUser && message.citations?.length > 0 && <div className="evidence-block"><div className="evidence-heading"><span><span className="evidence-bar" />Grounded evidence</span><span>{message.citations.length} sources</span></div><div className="citation-list">{message.citations.map((citation, index) => <CitationCard anchor={`cite-${id}-${citation.index || index + 1}`} citation={{ ...citation, index: citation.index || index + 1 }} key={`${citation.source}-${citation.page || citation.section || index}`} />)}</div>{message.metrics && <div className="metrics-row"><span><b>{message.metrics.used_chunks ?? message.metrics.used ?? 0}</b> chunks used</span><span><b>{message.metrics.top_score == null ? '—' : `${Math.round(Number(message.metrics.top_score) * 100)}%`}</b> top score</span><span><b>{message.metrics.context_chars ?? 0}</b> context chars</span></div>}</div>}</article>
+  return (
+    <article className={`message ${isUser ? 'message-user' : 'message-assistant'}`}>
+      <div className="message-meta">
+        <span className={`avatar ${isUser ? 'avatar-user' : 'avatar-assistant'}`}>{isUser ? 'YOU' : 'LU'}</span>
+        <strong>{isUser ? 'You' : 'Lumen'}</strong>
+        <span className="message-time">{message.time || 'now'}</span>
+        {message.demo && <span className="demo-answer-label">DEMO ANSWER</span>}
+      </div>
+      <div className="message-body">
+        {isUser
+          ? message.content.split('\n').map((line, index) => <p key={`${line}-${index}`}>{line || '\u00a0'}</p>)
+          : <AnswerText text={message.content} onCite={(n) => openCitation(`cite-${id}-${n}`)} />}
+      </div>
+      {!isUser && <VerifyPill verify={message.verify} />}
+      {!isUser && message.citations?.length > 0 && (
+        <div className="answer-foot">
+          <span className={`match-pill tone-${level.tone}`}>{level.label}</span>
+          <span className="answer-count">{message.citations.length} {message.citations.length === 1 ? 'source' : 'sources'}</span>
+          {message.metrics && <span className="answer-receipt">{message.metrics.used_chunks ?? 0}/{message.metrics.retrieved_chunks ?? 0} chunks used · {message.metrics.dropped_chunks ?? 0} dropped</span>}
+        </div>
+      )}
+      {!isUser && message.citations?.length > 0 && (
+        <div className="evidence-block">
+          <div className="evidence-heading">
+            <span><span className="evidence-bar" />Grounded evidence</span>
+            <span>{message.citations.length} sources</span>
+          </div>
+          <div className="citation-list">
+            {message.citations.map((citation, index) => (
+              <CitationCard
+                anchor={`cite-${id}-${citation.index || index + 1}`}
+                citation={{ ...citation, index: citation.index || index + 1 }}
+                key={`${citation.source}-${citation.page || citation.section || index}`}
+              />
+            ))}
+          </div>
+          {message.metrics && (
+            <div className="metrics-row">
+              <span><b>{message.metrics.used_chunks ?? message.metrics.used ?? 0}</b> chunks used</span>
+              <span><b>{message.metrics.top_score == null ? '—' : `${Math.round(Number(message.metrics.top_score) * 100)}%`}</b> top score</span>
+              <span><b>{message.metrics.context_chars ?? 0}</b> context chars</span>
+            </div>
+          )}
+        </div>
+      )}
+      {!isUser && <Followups items={message.followups} onFollowup={onFollowup} />}
+    </article>
+  )
 }
 
 function App() {
@@ -344,7 +408,7 @@ function App() {
     setIsLoading(true)
     try {
       const response = isDemo ? await new Promise((resolve) => setTimeout(() => resolve(demoResponse(trimmed)), 750)) : await sendChat(trimmed, history, activeSources.length < documents.length ? activeSources : undefined)
-      setMessages((current) => [...current, { role: 'assistant', content: response.answer || 'I could not generate an answer.', citations: response.citations || response.sources || [], metrics: response.metrics || {}, demo: isDemo, time: nowLabel() }])
+      setMessages((current) => [...current, { role: 'assistant', content: response.answer || 'I could not generate an answer.', citations: response.citations || response.sources || [], metrics: response.metrics || {}, verify: response.verify, followups: response.followups || [], demo: isDemo, time: nowLabel() }])
     } catch (chatError) {
       setError(chatError.message || 'The retrieval service could not answer. Try again.')
     } finally {
@@ -376,7 +440,7 @@ function App() {
         <section className={`thread ${hasMessages ? 'has-messages' : ''}`} role="log" aria-label="Chat thread">
           {!hasMessages && status !== 'checking' && <Welcome onPrompt={(prompt) => ask(prompt)} docCount={documents.length} starters={buildStarters(documents, isDemo)} />}
           {status === 'checking' && <div className="checking-state"><span className="loader-ring" /><p>Connecting to your retrieval index…</p></div>}
-          {messages.map((message, index) => <Message message={message} id={index} key={`${message.role}-${index}`} />)}
+          {messages.map((message, index) => <Message message={message} id={index} key={`${message.role}-${index}`} onFollowup={(q) => ask(q)} />)}
           {isLoading && <div className="message message-assistant loading-message"><div className="message-meta"><span className="avatar avatar-assistant">LU</span><strong>Lumen</strong><span className="message-time">retrieving</span></div><div className="loading-bubble"><span /><span /><span /><em>Finding grounded passages…</em></div></div>}
           <div ref={endRef} className="thread-end" />
         </section>

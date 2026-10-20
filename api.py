@@ -27,8 +27,10 @@ from pydantic import BaseModel, Field
 from src.chunking import chunk_pages
 from src.config import settings
 from src.loaders import LoaderDependencyError, SUPPORTED, load_file
+from src.llm import generate
 from src.rag import answer
 from src.vectorstore import VectorStore
+from src.verification import suggest_followups, verify_answer
 
 
 _store: VectorStore | None = None
@@ -511,12 +513,28 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 ),
             ) from exc
         raise HTTPException(status_code=502, detail="Could not generate an answer. Please retry.") from exc
-    return {
+    payload = {
         "answer": result["answer"],
         "citations": [_public_hit(item) for item in result.get("citations", [])],
         "sources": [_public_hit(item) for item in result.get("sources", [])],
         "metrics": result.get("metrics", {}),
     }
+    if result.get("citations"):
+        # The trust layer: verify claims and suggest follow-ups. Both are
+        # fail-open, so an API outage in one pass never blocks the answer.
+        try:
+            payload["verify"] = verify_answer(
+                result["answer"], result["citations"], settings, generate
+            )
+        except Exception:
+            payload["verify"] = {"status": "skipped", "unsupported": []}
+        try:
+            payload["followups"] = suggest_followups(
+                question, result["answer"], result["citations"], settings, generate
+            )
+        except Exception:
+            payload["followups"] = []
+    return payload
 
 
 @app.delete("/api/library")
