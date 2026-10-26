@@ -6,9 +6,11 @@ class FakeStore:
     def __init__(self, hits):
         self.hits = hits
         self.last_sources = None
+        self.last_user_id = None
 
-    def query(self, q, k, sources=None):
+    def query(self, q, k, sources=None, user_id=None):
         self.last_sources = sources
+        self.last_user_id = user_id
         return self.hits
 
 
@@ -49,3 +51,9 @@ def test_sources_filter_passed_to_store():
     store = FakeStore([{"text": "x", "source": "a.txt", "page": None, "score": 0.9}])
     answer("q", store, S, llm_fn=fake_llm)
     assert store.last_sources is None
+
+
+def test_user_id_is_passed_to_scoped_store():
+    store = FakeStore([{"text": "x", "source": "a.txt", "page": None, "score": 0.9}])
+    answer("q", store, S, llm_fn=fake_llm, user_id="user-123")
+    assert store.last_user_id == "user-123"

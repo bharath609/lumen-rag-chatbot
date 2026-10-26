@@ -100,6 +100,7 @@ def answer(
     history: list[dict] | None = None,
     llm_fn: Callable[..., str] = generate,
     sources: list[str] | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Return answer text plus source hits, citations, and retrieval metrics.
 
@@ -107,7 +108,10 @@ def answer(
     the LLM entirely, which reduces hallucination on out-of-scope questions.
     ``sources`` optionally restricts retrieval to those documents.
     """
-    retrieved = list(store.query(question, s.top_k, sources) or [])
+    if user_id is None:
+        retrieved = list(store.query(question, s.top_k, sources) or [])
+    else:
+        retrieved = list(store.query(question, s.top_k, sources, user_id) or [])
     hits = [
         hit
         for hit in retrieved

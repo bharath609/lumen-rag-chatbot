@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { clearLibrary, getHealth, getLibrary, sendChat, uploadDocuments } from './api'
+import AuthView from './AuthView'
+import { supabase, supabaseConfigured } from './supabase'
 import './styles.css'
 
 const ACCEPTED_FORMATS = '.pdf,.txt,.md,.mdx,.rst,.log,.tex,.xml,.yaml,.yml,.ini,.toml,.cfg,.conf,.sql,.py,.js,.jsx,.ts,.tsx,.java,.c,.h,.cpp,.hpp,.cs,.go,.rs,.rb,.php,.swift,.kt,.kts,.sh,.bash,.ps1,.bat,.cmd,.css,.scss,.sass,.less,.svg,.docx,.pptx,.xlsx,.xlsm,.xls,.csv,.tsv,.html,.htm,.json,.jsonl'
@@ -242,6 +244,8 @@ function Message({ message, id, focused, onFocus }) {
 }
 
 function App() {
+  const [session, setSession] = useState(null)
+  const [authReady, setAuthReady] = useState(!supabaseConfigured)
   const [status, setStatus] = useState('checking')
   const [documents, setDocuments] = useState([])
   const [chunks, setChunks] = useState(0)
@@ -255,7 +259,8 @@ function App() {
   const taRef = useRef(null)
   const [focus, setFocus] = useState({ index: null, cite: null })
 
-  const isDemo = status === 'demo'
+  const isDemo = false
+  const accessToken = session?.access_token || ''
   const hasMessages = messages.length > 0
   const history = useMemo(() => messages.map((message) => ({ role: message.role, content: message.content })), [messages])
   const evidenceMessage = focus.index != null ? messages[focus.index] : [...messages].reverse().find((item) => item.role === 'assistant' && item.citations?.length)
@@ -270,19 +275,39 @@ function App() {
   useEffect(() => { if (!question && taRef.current) taRef.current.style.height = 'auto' }, [question])
 
   useEffect(() => {
+    if (!supabase) return undefined
     let mounted = true
-    Promise.all([getHealth(), getLibrary()]).then(([health, library]) => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (mounted) {
+        setSession(data.session)
+        setAuthReady(true)
+      }
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (mounted) setSession(nextSession)
+    })
+    return () => {
+      mounted = false
+      listener.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!session) return undefined
+    let mounted = true
+    setStatus('checking')
+    Promise.all([getHealth(), getLibrary(accessToken)]).then(([health, library]) => {
       if (!mounted) return
       setStatus('connected')
       applyLibrary(library)
-      setChunks(health.chunks ?? library.chunks ?? 0)
-    }).catch(() => {
+       setChunks(library.chunks ?? health.chunks ?? 0)
+    }).catch((loadError) => {
       if (!mounted) return
-      setStatus('demo')
-      applyLibrary({ documents: DEMO_DOCUMENTS, chunks: 71 })
+      setStatus('error')
+      setError(loadError.message || 'Could not connect to your private library.')
     })
     return () => { mounted = false }
-  }, [])
+  }, [session, accessToken])
 
   async function handleUpload(files) {
     setError('')
@@ -294,8 +319,8 @@ function App() {
         const next = [...documents.filter((document) => !additions.some((item) => item.source === document.source)), ...additions]
         applyLibrary({ documents: next, chunks: next.reduce((sum, document) => sum + Number(document.chunk_count || 0), 0) })
       } else {
-        await uploadDocuments(files)
-        applyLibrary(await getLibrary())
+        await uploadDocuments(files, accessToken)
+        applyLibrary(await getLibrary(accessToken))
       }
     } catch (uploadError) {
       setError(uploadError.message || 'Could not index those documents.')
@@ -311,7 +336,7 @@ function App() {
       if (isDemo) {
         setDocuments([])
         setChunks(0)
-      } else applyLibrary(await clearLibrary())
+      } else applyLibrary(await clearLibrary(accessToken))
     } catch (clearError) {
       setError(clearError.message || 'Could not clear the library.')
     }
@@ -326,7 +351,7 @@ function App() {
     setMessages((current) => [...current, userMessage])
     setIsLoading(true)
     try {
-      const response = isDemo ? await new Promise((resolve) => setTimeout(() => resolve(demoResponse(trimmed)), 750)) : await sendChat(trimmed, history)
+      const response = await sendChat(trimmed, history, null, accessToken)
       setMessages((current) => [...current, { role: 'assistant', content: response.answer || 'I could not generate an answer.', citations: response.citations || response.sources || [], metrics: response.metrics || {}, demo: isDemo, time: nowLabel() }])
       setFocus({ index: null, cite: null })
     } catch (chatError) {
@@ -343,10 +368,14 @@ function App() {
     }
   }
 
+  if (!authReady) return <div className="checking-state"><span className="loader-ring" /><p>Checking your session…</p></div>
+  if (!supabaseConfigured) return <AuthView setupError="Authentication is not configured. Add the Supabase frontend variables before using Lumen." />
+  if (!session) return <AuthView />
+
   return <div className="app-shell">
     <LibrarySidebar documents={documents} chunks={chunks} status={status} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
     <main className="chat-workspace">
-      <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong>Ask Lumen</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Retrieval ready'}</span><button type="button" className="new-chat" onClick={() => { setMessages([]); setError(''); setFocus({ index: null, cite: null }) }}><Icon name="plus" size={20} /> New thread</button></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong>Ask Lumen</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Private workspace'}</span><span className="account-email" title={session.user?.email}>{session.user?.email}</span><button type="button" className="new-chat" onClick={() => { setMessages([]); setError(''); setFocus({ index: null, cite: null }) }}><Icon name="plus" size={20} /> New thread</button><button type="button" className="signout-button" onClick={() => supabase.auth.signOut()}>Sign out</button></div></header>
       <div className="chat-content">
         <section className={`thread ${hasMessages ? 'has-messages' : ''}`} role="log" aria-label="Chat thread">
           {!hasMessages && status !== 'checking' && <Welcome onPrompt={(prompt) => ask(prompt)} docCount={documents.length} starters={buildStarters(documents, isDemo)} />}

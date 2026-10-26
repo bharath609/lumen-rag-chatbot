@@ -97,6 +97,40 @@ Index from the command line instead: `python ingest.py data/sample`.
 In `.env`: `LLM_PROVIDER=anthropic`, `LLM_MODEL=<model name from Anthropic docs>`,
 and `ANTHROPIC_API_KEY=...`.
 
+## Private multi-user deployment with Supabase
+
+The hosted React client can run as a private, multi-user workspace. Supabase
+Auth handles email/password accounts; every API request carries the user's
+Supabase access token, and the FastAPI boundary verifies it before reading,
+indexing, or deleting documents. Chroma metadata includes the authenticated
+user ID, so retrieval and library listings are scoped to that account.
+
+### Supabase setup
+
+1. Create a Supabase project and enable **Authentication → Providers → Email**.
+2. In **Authentication → URL Configuration**, add:
+   `https://bharath609.github.io/lumen-rag-chatbot/`.
+3. Copy the project URL and publishable/anon key from **Project Settings → API**.
+4. Add these Render environment variables:
+
+   ```text
+   SUPABASE_URL=https://<project-ref>.supabase.co
+   SUPABASE_ANON_KEY=<publishable-or-anon-key>
+   ```
+
+5. Add these GitHub repository Actions secrets for the Pages build:
+
+   ```text
+   VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+   VITE_SUPABASE_PUBLISHABLE_KEY=<publishable-or-anon-key>
+   ```
+
+Never expose a Supabase service-role key in the frontend or commit it to Git.
+The frontend provides sign-in, account creation, password reset, and sign-out.
+Unauthenticated visitors cannot list, upload, query, or clear a library. The
+configured Chroma Cloud index remains required for durable indexed data because
+the Render filesystem is not permanent.
+
 ## Supported documents
 
 The API extracts text from PDF, DOCX, PPTX, XLS/XLSX/XLSM, CSV/TSV, HTML, JSON,

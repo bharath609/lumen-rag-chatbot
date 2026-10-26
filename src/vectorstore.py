@@ -198,7 +198,7 @@ class VectorStore:
     @staticmethod
     def _id(chunk: dict[str, Any]) -> str:
         return hashlib.sha1(
-            f"{chunk.get('source', '')}|{chunk.get('page')}|{chunk.get('chunk', 0)}|{chunk.get('text', '')}".encode(
+            f"{chunk.get('user_id', '')}|{chunk.get('source', '')}|{chunk.get('page')}|{chunk.get('chunk', 0)}|{chunk.get('text', '')}".encode(
                 "utf-8"
             )
         ).hexdigest()
@@ -208,6 +208,7 @@ class VectorStore:
         # Chroma metadata values cannot be None, so keep the historical 0
         # representation for an absent page.  Query converts it back to None.
         metadata: dict[str, Any] = {
+            "user_id": str(chunk.get("user_id", "")),
             "source": str(chunk.get("source", "")),
             "page": chunk.get("page") or 0,
             "chunk": int(chunk.get("chunk", 0)),
@@ -222,13 +223,16 @@ class VectorStore:
             metadata["doc_type"] = str(chunk["doc_type"])
         return metadata
 
-    def delete_source(self, source: str) -> None:
+    def delete_source(self, source: str, user_id: str | None = None) -> None:
         """Delete every indexed chunk belonging to one source filename."""
         if not source:
             return
-        self.col.delete(where={"source": source})
+        where: dict[str, Any] = {"source": source}
+        if user_id:
+            where = {"$and": [{"user_id": user_id}, where]}
+        self.col.delete(where=where)
 
-    def add(self, chunks: list[dict], replace: bool = True) -> int:
+    def add(self, chunks: list[dict], replace: bool = True, user_id: str | None = None) -> int:
         """Index chunks and optionally replace old chunks for their sources.
 
         Replacement is the default so re-indexing a changed file cannot leave
@@ -242,9 +246,12 @@ class VectorStore:
         ids = [self._id(c) for c in chunks]
         embeddings = self._embed(texts)
         source_names = {str(c.get("source", "")) for c in chunks if c.get("source")}
+        effective_user_id = user_id or next(
+            (str(c.get("user_id")) for c in chunks if c.get("user_id")), None
+        )
         if replace:
             for source in source_names:
-                self.delete_source(source)
+                self.delete_source(source, effective_user_id)
 
         self.col.upsert(
             ids=ids,
@@ -254,23 +261,36 @@ class VectorStore:
         )
         return len(chunks)
 
-    def replace_source(self, source: str, chunks: list[dict]) -> int:
+    def replace_source(
+        self, source: str, chunks: list[dict], user_id: str | None = None
+    ) -> int:
         """Replace one source, including the zero-chunk (empty document) case."""
-        normalized = [dict(chunk, source=source) for chunk in chunks]
+        normalized = [dict(chunk, source=source, user_id=user_id or chunk.get("user_id")) for chunk in chunks]
         if not normalized:
-            self.delete_source(source)
+            self.delete_source(source, user_id)
             return 0
-        return self.add(normalized, replace=True)
+        return self.add(normalized, replace=True, user_id=user_id)
 
     def query(
-        self, question: str, k: int = 4, sources: list[str] | None = None
+        self,
+        question: str,
+        k: int = 4,
+        sources: list[str] | None = None,
+        user_id: str | None = None,
     ) -> list[dict]:
         count = self.col.count()
         if count == 0 or k <= 0:
             return []
-        where = None
+        where: dict[str, Any] | None = None
+        filters: list[dict[str, Any]] = []
+        if user_id:
+            filters.append({"user_id": user_id})
         if sources:  # restrict retrieval to specific documents
-            where = {"source": {"$in": sorted(set(sources))}}
+            filters.append({"source": {"$in": sorted(set(sources))}})
+        if len(filters) == 1:
+            where = filters[0]
+        elif filters:
+            where = {"$and": filters}
         result = self.col.query(
             query_embeddings=self._embed([question]),
             n_results=min(k, count),
@@ -302,7 +322,7 @@ class VectorStore:
         metadatas = self.col.get(include=["metadatas"]).get("metadatas") or []
         return sorted({str(meta.get("source")) for meta in metadatas if meta and meta.get("source")})
 
-    def library_records(self) -> list[dict[str, Any]]:
+    def library_records(self, user_id: str | None = None) -> list[dict[str, Any]]:
         """Describe every indexed source using only what the index stores.
 
         Used to rebuild the library registry after an ephemeral host wipes the
@@ -310,7 +330,9 @@ class VectorStore:
         """
         if self.col.count() == 0:
             return []
-        metadatas = self.col.get(include=["metadatas"]).get("metadatas") or []
+        where = {"user_id": user_id} if user_id else None
+        result = self.col.get(include=["metadatas"], where=where)
+        metadatas = result.get("metadatas") or []
         grouped: dict[str, dict[str, Any]] = {}
         for meta in metadatas:
             if not isinstance(meta, dict) or not meta.get("source"):
@@ -337,7 +359,10 @@ class VectorStore:
         """Return the number of indexed chunks without loading embeddings."""
         return int(self.col.count())
 
-    def reset(self) -> None:
+    def reset(self, user_id: str | None = None) -> None:
+        if user_id:
+            self.col.delete(where={"user_id": user_id})
+            return
         self.client.delete_collection(self.collection_name)
         self.col = self.client.get_or_create_collection(
             name=self.collection_name, metadata={"hnsw:space": "cosine"}

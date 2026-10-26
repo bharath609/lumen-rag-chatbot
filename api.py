@@ -20,12 +20,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from src.chunking import chunk_pages
 from src.config import settings
+from src.auth import require_user
 from src.loaders import LoaderDependencyError, SUPPORTED, load_file
 from src.llm import generate
 from src.rag import answer
@@ -251,7 +252,7 @@ def _mime_type(filename: str, supplied: str | None) -> str:
     return mimetypes.guess_type(filename)[0] or supplied or "application/octet-stream"
 
 
-async def _index_upload(upload: UploadFile, registry: LibraryRegistry) -> dict[str, Any]:
+async def _index_upload(upload: UploadFile, user_id: str, registry: LibraryRegistry | None = None) -> dict[str, Any]:
     source = sanitize_filename(upload.filename)
     extension = Path(source).suffix.lower()
     if extension not in SUPPORTED:
@@ -277,17 +278,18 @@ async def _index_upload(upload: UploadFile, registry: LibraryRegistry) -> dict[s
         # rebuilt straight from the persistent index after a host restart.
         doc_type = _mime_type(source, getattr(upload, "content_type", None))
         for chunk in chunks:
+            chunk["user_id"] = user_id
             chunk["doc_bytes"] = len(payload)
             chunk["doc_type"] = doc_type
         store = _get_store()
         replace_source = getattr(store, "replace_source", None)
         if callable(replace_source):
-            replace_source(source, chunks)
+            replace_source(source, chunks, user_id=user_id)
         else:  # Keeps the API easy to exercise with a tiny fake store in tests.
             delete_source = getattr(store, "delete_source", None)
             if callable(delete_source):
-                delete_source(source)
-            store.add(chunks)
+                delete_source(source, user_id)
+            store.add(chunks, user_id=user_id)
         os.replace(temporary_name, final_path)
     finally:
         try:
@@ -296,7 +298,14 @@ async def _index_upload(upload: UploadFile, registry: LibraryRegistry) -> dict[s
             pass
 
     now = _utc_now()
-    previous = next((item for item in registry.read() if item.get("source") == source), None)
+    previous = next(
+        (
+            item
+            for item in (registry.read() if registry is not None else [])
+            if item.get("source") == source
+        ),
+        None,
+    )
     record = {
         "source": source,
         "name": source,
@@ -309,7 +318,7 @@ async def _index_upload(upload: UploadFile, registry: LibraryRegistry) -> dict[s
         "updated_at": now,
         "uploaded_at": now,
     }
-    return registry.upsert(record)
+    return registry.upsert(record) if registry is not None else record
 
 
 class ChatRequest(BaseModel):
@@ -364,6 +373,11 @@ def _seed_library_sync() -> None:
     """
     import asyncio as _asyncio
 
+    # Authenticated deployments must never seed a shared library that could
+    # accidentally become visible to an account. Demo seeding is for the
+    # unauthenticated/local mode only.
+    if os.getenv("SUPABASE_URL", "").strip():
+        return
     seed_dir = os.getenv("SEED_DIR", "data/sample")
     registry = LibraryRegistry()
     if not registry.read():
@@ -389,7 +403,7 @@ def _seed_library_sync() -> None:
         try:
             with item.open("rb") as handle:
                 upload = UploadFile(file=handle, filename=item.name)
-                _asyncio.run(_index_upload(upload, registry))
+                _asyncio.run(_index_upload(upload, "demo", registry))
         except Exception as exc:  # best effort: one bad seed file skips, rest index
             log.warning("Skipping seed file %s: %s", item, exc)
 
@@ -436,8 +450,8 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/api/library")
-def library() -> dict[str, Any]:
-    records = [_public_record(item) for item in LibraryRegistry().read()]
+def library(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    records = [_public_record(item) for item in _get_store().library_records(user["id"])]
     return {
         "documents": records,
         "total": len(records),
@@ -446,16 +460,17 @@ def library() -> dict[str, Any]:
 
 
 @app.post("/api/documents")
-async def upload_documents(files: list[UploadFile] = File(...)) -> dict[str, Any]:
+async def upload_documents(
+    files: list[UploadFile] = File(...), user: dict[str, Any] = Depends(require_user)
+) -> dict[str, Any]:
     if not files:
         raise HTTPException(status_code=400, detail="At least one document is required")
 
-    registry = LibraryRegistry()
     indexed: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     for upload in files:
         try:
-            indexed.append(await _index_upload(upload, registry))
+            indexed.append(await _index_upload(upload, user["id"]))
         except (
             LoaderDependencyError,
             ConnectionError,
@@ -484,7 +499,7 @@ async def upload_documents(files: list[UploadFile] = File(...)) -> dict[str, Any
 
 
 @app.post("/api/chat")
-def chat(request: ChatRequest) -> dict[str, Any]:
+def chat(request: ChatRequest, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     question = request.question.strip()
     if not question:
         raise HTTPException(status_code=422, detail="question must not be blank")
@@ -495,6 +510,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             settings,
             _clean_history(request.history or []),
             sources=request.sources,
+            user_id=user["id"],
         )
     except (ConnectionError, TimeoutError) as exc:
         raise HTTPException(status_code=502, detail=f"LLM offline: {exc}") from exc
@@ -538,27 +554,17 @@ def chat(request: ChatRequest) -> dict[str, Any]:
 
 
 @app.delete("/api/library")
-def clear_library() -> dict[str, Any]:
-    registry = LibraryRegistry()
-    records = registry.clear()
+def clear_library(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    records = _get_store().library_records(user["id"])
 
     # Constructing VectorStore does not load the embedding model, so stale
     # Chroma chunks are removed even when this process has not handled a chat.
     if _store is not None:
         reset = getattr(_store, "reset", None)
         if callable(reset):
-            reset()
+            reset(user["id"])
     elif Path(settings.persist_dir).exists():
-        _get_store().reset()
-
-    upload_dir = Path(settings.upload_dir)
-    if upload_dir.exists():
-        for path in upload_dir.iterdir():
-            if path.is_file():
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
+        _get_store().reset(user["id"])
     return {"status": "ok", "deleted": len(records)}
 
 

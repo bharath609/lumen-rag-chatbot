@@ -1,6 +1,10 @@
 import json
+from unittest.mock import Mock, patch
+
+import pytest
 
 from api import LibraryRegistry, local_origin, sanitize_filename
+from src.auth import require_user
 
 
 def test_sanitize_filename_flattens_paths_and_unsafe_characters():
@@ -50,3 +54,22 @@ def test_library_registry_upserts_and_preserves_created_timestamp(tmp_path):
         }
     ]
     assert json.loads((tmp_path / "library.json").read_text())
+
+
+def test_supabase_auth_returns_user_id(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "public-key")
+    response = Mock(status_code=200)
+    response.json.return_value = {"id": "user-123", "email": "person@example.com"}
+    with patch("src.auth.requests.get", return_value=response) as get:
+        user = require_user("Bearer access-token")
+    assert user["id"] == "user-123"
+    assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer access-token"
+
+
+def test_supabase_auth_rejects_missing_token(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "public-key")
+    with pytest.raises(Exception) as error:
+        require_user(None)
+    assert getattr(error.value, "status_code", None) == 401

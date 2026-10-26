@@ -2,10 +2,11 @@
 # 1. Push this folder as a GitHub repo (repo root = this folder).
 # 2. In Render: New -> Blueprint -> point at the repo.
 # 3. Set GEMINI_API_KEY (free key: https://aistudio.google.com/apikey).
-# 4. Set RAG_CORS_ORIGINS to your frontend URL (e.g. https://<user>.github.io).
+# 4. Set Supabase Auth variables in Render Environment.
 #
-# Note: free disks are ephemeral — uploads vanish on restart/redeploy.
-# SEED_DIR pre-loads data/sample so the public demo always has content.
+# Vector embeddings use the configured persistent Chroma Cloud index. Uploaded
+# source files are parsed and indexed; account isolation is enforced by Supabase
+# access tokens plus user_id metadata in the vector index.
 services:
   - type: web
     name: lumen-rag-api
@@ -25,8 +26,12 @@ services:
         sync: false
       - key: RAG_CORS_ORIGINS
         value: https://bharath609.github.io
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
       - key: SEED_DIR
-        value: data/sample
+        value: ""
       - key: TOP_K
         value: 4
       - key: MIN_SCORE

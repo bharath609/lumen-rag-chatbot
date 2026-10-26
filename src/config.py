@@ -25,6 +25,8 @@ class Settings:
     persist_dir: Path = ROOT / "chroma_db"
     upload_dir: Path = ROOT / "data" / "uploads"
     collection: str = "documents"
+    supabase_url: str = os.getenv("SUPABASE_URL", "")
+    supabase_anon_key: str = os.getenv("SUPABASE_ANON_KEY", "")
 
 
 settings = Settings()
