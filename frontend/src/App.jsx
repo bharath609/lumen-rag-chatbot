@@ -88,6 +88,9 @@ function friendlyError(message) {
   if (/no documents|not found in documents/i.test(text)) {
     return { title: 'Nothing relevant found', body: 'Try rephrasing, or upload the document that contains the answer first.' }
   }
+  if (/^Indexed \d+ of \d+ file/i.test(text)) {
+    return { title: 'Some documents were not indexed', body: text }
+  }
   return { title: 'Could not answer', body: text.length > 220 ? `${text.slice(0, 220)}…` : text }
 }
 
@@ -125,7 +128,7 @@ function fileType(source = '') {
 }
 
 function normalizeDocument(document) {
-  return { ...document, source: document.source || document.name || 'Untitled document', type: document.type || fileType(document.source || document.name), chunk_count: document.chunk_count ?? document.chunks ?? 0 }
+  return { ...document, source: document.source || document.name || 'Untitled document', type: document.type || fileType(document.source || document.name), size: document.size ?? document.doc_bytes ?? 0, chunk_count: document.chunk_count ?? document.chunks ?? 0 }
 }
 
 function demoResponse(question) {
@@ -319,8 +322,28 @@ function App() {
         const next = [...documents.filter((document) => !additions.some((item) => item.source === document.source)), ...additions]
         applyLibrary({ documents: next, chunks: next.reduce((sum, document) => sum + Number(document.chunk_count || 0), 0) })
       } else {
-        await uploadDocuments(files, accessToken)
-        applyLibrary(await getLibrary(accessToken))
+        const seen = new Set()
+        const failures = []
+        let indexed = 0
+        for (const file of files) {
+          if (seen.has(file.name)) {
+            failures.push({ source: file.name, error: 'Duplicate filename in this upload; rename it and try again.' })
+            continue
+          }
+          seen.add(file.name)
+          try {
+            const result = await uploadDocuments([file], accessToken)
+            indexed += Number(result?.indexed ?? 0)
+            if (result?.errors?.length) failures.push(...result.errors)
+          } catch (fileError) {
+            failures.push({ source: file.name, error: fileError.message || 'Upload failed.' })
+          }
+          try { applyLibrary(await getLibrary(accessToken)) } catch { /* keep indexing the rest */ }
+        }
+        if (failures.length) {
+          const detail = failures.map((item) => `${item.source}: ${item.error}`).join(' | ')
+          setError(`Indexed ${indexed} of ${files.length} file(s). ${detail}`)
+        }
       }
     } catch (uploadError) {
       setError(uploadError.message || 'Could not index those documents.')
