@@ -133,6 +133,19 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_STARTED_AT = _utc_now()
+
+
+def storage_backend() -> str:
+    """Name the durable store selected by the current environment."""
+    database_url = (os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or "").strip()
+    if database_url.startswith(("postgres://", "postgresql://")):
+        return "supabase-pgvector"
+    if os.getenv("CHROMA_API_KEY") and os.getenv("CHROMA_TENANT") and os.getenv("CHROMA_DATABASE"):
+        return "chroma-cloud"
+    return "local-chroma"
+
+
 def _library_path() -> Path:
     return Path(settings.upload_dir).parent / "library.json"
 
@@ -455,12 +468,17 @@ def health() -> dict[str, Any]:
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "embedding_provider": settings.embedding_provider,
+        "storage": storage_backend(),
+        "started_at": _STARTED_AT,
     }
 
 
 @app.get("/api/library")
 def library(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
-    records = [_public_record(item) for item in _get_store().library_records(user["id"])]
+    try:
+        records = [_public_record(item) for item in _get_store().library_records(user["id"])]
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
         "documents": records,
         "total": len(records),
