@@ -99,6 +99,86 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8-sig", errors="ignore").strip()
 
 
+_OCR_PROMPT = (
+    "You are an OCR engine. Extract ALL text visible in this document exactly "
+    "as written. Include names, numbers, dates, labels, and table cells. "
+    "Preserve reading order and line breaks. Do not summarize, translate, "
+    "explain, or add commentary. If a value is unclear, give your best "
+    "transcription. Return plain text only, without Markdown fences."
+)
+
+
+def _ocr_pdf_with_gemini(path: Path, source: str) -> list[dict[str, Any]]:
+    """OCR a scanned PDF by sending it to Gemini as an inline document.
+
+    Returns an empty list when OCR is disabled or no Gemini key is configured;
+    the caller then keeps whatever native text pypdf managed to find.
+    """
+    import base64
+    import os
+
+    if os.getenv("OCR_ENABLED", "true").strip().lower() in {"0", "false", "no", "off"}:
+        return []
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return []
+
+    import requests
+
+    size = path.stat().st_size
+    if size > 18 * 1024 * 1024:
+        raise ValueError(
+            f"'{source}' looks scanned and is {size / 1_000_000:.1f} MB, which is "
+            "too large for inline OCR. Upload a PDF under 18 MB or add a text layer."
+        )
+    model = (
+        os.getenv("GEMINI_OCR_MODEL", "").strip()
+        or os.getenv("LLM_MODEL", "").strip()
+        or "gemini-2.5-flash"
+    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    body = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": _OCR_PROMPT},
+                    {
+                        "inline_data": {
+                            "mime_type": "application/pdf",
+                            "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 8192},
+    }
+    try:
+        resp = requests.post(url, params={"key": api_key}, json=body, timeout=180)
+    except requests.exceptions.RequestException as exc:
+        raise ValueError(
+            f"OCR for '{source}' failed: could not reach the Gemini API."
+        ) from exc
+    if resp.status_code >= 400:
+        detail = resp.text[:300]
+        try:
+            detail = resp.json().get("error", {}).get("message", detail)
+        except Exception:
+            pass
+        raise ValueError(
+            f"OCR for '{source}' failed (HTTP {resp.status_code}): {detail}"
+        )
+    try:
+        candidates = resp.json().get("candidates") or []
+        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        text = "\n".join(str(part.get("text", "")) for part in parts).strip()
+    except (TypeError, ValueError, KeyError) as exc:
+        raise ValueError(f"OCR for '{source}' returned an unexpected response.") from exc
+    text = re.sub(r"^```(?:text)?\s*|\s*```$", "", text).strip()
+    return [{"text": text, "source": source, "page": 1}] if text else []
+
+
 def _load_pdf(path: Path, source: str) -> list[dict[str, Any]]:
     try:
         from pypdf import PdfReader
@@ -106,15 +186,25 @@ def _load_pdf(path: Path, source: str) -> list[dict[str, Any]]:
         raise _missing_dependency(".pdf", "pypdf") from exc
 
     pages: list[dict[str, Any]] = []
+    page_count = 0
     try:
         with path.open("rb") as handle:
             reader = PdfReader(handle)
+            page_count = len(reader.pages)
             for i, page in enumerate(reader.pages, start=1):
                 text = (page.extract_text() or "").strip()
                 if text:
                     pages.append({"text": text, "source": source, "page": i})
     except Exception as exc:
         raise ValueError(f"Could not extract text from PDF '{source}': {exc}") from exc
+
+    # Image-only scans often expose just a header or a page number. OCR when
+    # the native text layer is too thin to answer questions about the document.
+    extracted_chars = sum(len(page["text"]) for page in pages)
+    if page_count and extracted_chars < max(40, 20 * page_count):
+        ocr_pages = _ocr_pdf_with_gemini(path, source)
+        if sum(len(page["text"]) for page in ocr_pages) > extracted_chars:
+            return ocr_pages
     return pages
 
 
