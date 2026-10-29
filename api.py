@@ -409,7 +409,7 @@ def _seed_library_sync() -> None:
         try:
             _rebuild_registry_from_index(registry)
         except Exception as exc:
-            log = logging.getLogger("lumen.seed")
+            log = logging.getLogger("lumora.seed")
             log.warning("Registry rebuild skipped: %s", exc)
     if not seed_dir:
         return
@@ -421,7 +421,7 @@ def _seed_library_sync() -> None:
         for item in sorted(path.iterdir())
         if item.is_file() and item.suffix.lower() in SUPPORTED
     ]
-    log = logging.getLogger("lumen.seed")
+    log = logging.getLogger("lumora.seed")
     for item in files:
         try:
             with item.open("rb") as handle:

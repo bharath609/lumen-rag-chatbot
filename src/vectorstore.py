@@ -1,4 +1,4 @@
-"""Vector storage for Lumen.
+"""Vector storage for Lumora.
 
 When ``DATABASE_URL`` points at Supabase Postgres, chunks and embeddings are
 stored in a ``pgvector`` table.  That makes the library durable on hosts with

@@ -38,7 +38,7 @@ export default function AuthView({ onSignedIn, setupError }) {
     }
   }
 
-  const title = mode === 'signup' ? 'Create your private workspace' : mode === 'forgot' ? 'Reset your password' : 'Welcome back to Lumen'
+  const title = mode === 'signup' ? 'Create your private workspace' : mode === 'forgot' ? 'Reset your password' : 'Welcome back to Lumora'
   const submitLabel = mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Sign in'
 
   return <main className="auth-shell">

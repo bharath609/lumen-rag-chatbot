@@ -1,4 +1,4 @@
-# Render blueprint for the Lumen RAG API (free tier).
+# Render blueprint for the Lumora RAG API (free tier).
 # 1. Push this folder as a GitHub repo (repo root = this folder).
 # 2. In Render: New -> Blueprint -> point at the repo.
 # 3. Set GEMINI_API_KEY (free key: https://aistudio.google.com/apikey).
@@ -9,7 +9,7 @@
 # access tokens plus user_id metadata in the vector index.
 services:
   - type: web
-    name: lumen-rag-api
+    name: lumen-rag-api  # kept as-is so the existing Render service URL stays live
     runtime: docker
     plan: free
     healthCheckPath: /api/health

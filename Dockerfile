@@ -1,4 +1,4 @@
-# Lumen RAG API — cloud deploy (Render/Railway/Fly friendly).
+# Lumora RAG API — cloud deploy (Render/Railway/Fly friendly).
 # Serves FastAPI on $PORT (platforms inject it; defaults to 8000 locally).
 FROM python:3.12-slim
 

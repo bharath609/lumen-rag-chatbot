@@ -1,6 +1,6 @@
-# Lumen frontend
+# Lumora frontend
 
-Lumen is the React client for the local RAG document chatbot. It runs as a Vite
+Lumora is the React client for the local RAG document chatbot. It runs as a Vite
 development server and uses relative `/api/*` requests, so it can talk to the
 FastAPI service without exposing the backend to the public internet.
 

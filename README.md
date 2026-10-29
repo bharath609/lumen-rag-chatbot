@@ -1,6 +1,6 @@
-# Lumen — grounded document intelligence
+# Lumora — grounded document intelligence
 
-Lumen is a local-first Retrieval-Augmented Generation (RAG) chatbot. Upload common
+Lumora is a local-first Retrieval-Augmented Generation (RAG) chatbot. Upload common
 documents, ask questions in a conversational workspace, and inspect the passages that
 ground each answer. React is the UI layer; the product is the RAG system: ingestion,
 structure-aware chunking, local embeddings, vector retrieval, a relevance gate, and
@@ -29,10 +29,10 @@ Why each piece:
   and context metrics behind each response.
 - **A pluggable LLM** supports local Ollama by default and optional Anthropic API use.
 
-## What makes Lumen different
+## What makes Lumora different
 
 Most RAG products (including NotebookLM) stop at "retrieve, answer, cite."
-Lumen closes the trust loop with three mechanisms that show the system's own
+Lumora closes the trust loop with three mechanisms that show the system's own
 reasoning — designed to be defensible in an engineering interview:
 
 1. **Claim-level self-verification.** After an answer is generated, a second
@@ -74,7 +74,7 @@ ollama pull llama3.2:3b
 # Terminal 1: start the RAG API from this folder
 uvicorn api:app --reload --host 127.0.0.1 --port 8000
 
-# Terminal 2: start the Lumen UI
+# Terminal 2: start the Lumora UI
 cd frontend
 npm install
 npm run dev
@@ -109,7 +109,7 @@ user ID, so retrieval and library listings are scoped to that account.
 
 1. Create a Supabase project and enable **Authentication → Providers → Email**.
 2. In **Authentication → URL Configuration**, add:
-   `https://bharath609.github.io/lumen-rag-chatbot/`.
+   `https://bharath609.github.io/lumora-rag-chatbot/`.
 3. Copy the project URL and publishable/anon key from **Project Settings → API**.
 4. Add these Render environment variables:
 
@@ -143,10 +143,10 @@ with a clear message.
 ## Project structure
 
 ```text
-api.py              FastAPI boundary for the Lumen UI
+api.py              FastAPI boundary for the Lumora UI
 app.py              Streamlit fallback UI + upload sidebar
 ingest.py           CLI indexer
-frontend/           React/Vite Lumen workspace
+frontend/           React/Vite Lumora workspace
 src/config.py       Settings from .env
 src/loaders.py      Multi-format extraction into text pages
 src/chunking.py     Overlap-aware natural-boundary chunker
