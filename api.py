@@ -217,7 +217,11 @@ def _reset_store_for_tests() -> None:
 
 
 def _public_record(record: dict[str, Any]) -> dict[str, Any]:
-    return dict(record)
+    item = dict(record)
+    # Index-backed library records carry doc_bytes; the UI renders "size".
+    if "size" not in item:
+        item["size"] = item.get("doc_bytes") or 0
+    return item
 
 
 def _record_chunk_count(record: dict[str, Any]) -> int:
@@ -274,6 +278,11 @@ async def _index_upload(upload: UploadFile, user_id: str, registry: LibraryRegis
             handle.write(payload)
         pages = load_file(temporary_name, source=source)
         chunks = chunk_pages(pages, settings.chunk_size, settings.chunk_overlap)
+        if not chunks:
+            raise ValueError(
+                "No extractable text found. Scanned or image-only PDFs need OCR "
+                "before they can be indexed."
+            )
         # File metadata rides on every chunk so the library list can be
         # rebuilt straight from the persistent index after a host restart.
         doc_type = _mime_type(source, getattr(upload, "content_type", None))
