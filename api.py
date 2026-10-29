@@ -293,8 +293,9 @@ async def _index_upload(upload: UploadFile, user_id: str, registry: LibraryRegis
         chunks = chunk_pages(pages, settings.chunk_size, settings.chunk_overlap)
         if not chunks:
             raise ValueError(
-                "No extractable text found. Scanned or image-only PDFs need OCR "
-                "before they can be indexed."
+                "No extractable text found. The PDF may be a scan that OCR could "
+                "not read (check GEMINI_API_KEY / OCR_ENABLED), or it may be "
+                "password-protected."
             )
         # File metadata rides on every chunk so the library list can be
         # rebuilt straight from the persistent index after a host restart.
