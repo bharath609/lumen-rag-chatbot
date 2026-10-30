@@ -1,6 +1,24 @@
 import { useEffect, useState } from 'react'
-import { appUrl, supabase } from './supabase'
+import { appUrl, supabase, supabaseKey, supabaseUrl } from './supabase'
 import './styles.css'
+
+const projectRef = (supabaseUrl.match(/^https:\/\/([^.]+)\./) || [])[1] || ''
+const googleSetupUrl = projectRef ? `https://supabase.com/dashboard/project/${projectRef}/auth/providers` : ''
+
+async function googleIsEnabled() {
+  if (!supabaseUrl) return false
+  try {
+    const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/settings`, {
+      headers: supabaseKey ? { apikey: supabaseKey } : {},
+    })
+    if (!response.ok) return true
+    const settings = await response.json()
+    return settings?.external?.google !== false
+  } catch {
+    // If the check itself fails, let Supabase decide instead of blocking sign-in.
+    return true
+  }
+}
 
 function GoogleMark() {
   return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 48 48">
@@ -18,6 +36,7 @@ export default function AuthView({ onSignedIn, setupError }) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState(setupError || '')
+  const [googleSetup, setGoogleSetup] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -30,7 +49,14 @@ export default function AuthView({ onSignedIn, setupError }) {
     setBusy(true)
     setError('')
     setMessage('')
+    setGoogleSetup(false)
     try {
+      if (!(await googleIsEnabled())) {
+        setError('Google sign-in isn’t enabled for this project yet. Add your Google OAuth client in Supabase → Authentication → Providers, then try again.')
+        setGoogleSetup(true)
+        setBusy(false)
+        return
+      }
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -43,8 +69,9 @@ export default function AuthView({ onSignedIn, setupError }) {
     } catch (authError) {
       const detail = authError.message || ''
       setError(/provider is not enabled|unsupported provider/i.test(detail)
-        ? 'Google sign-in is not enabled for this project yet. Enable the Google provider in Supabase → Authentication → Providers.'
+        ? 'Google sign-in isn’t enabled for this project yet. Enable the Google provider in Supabase → Authentication → Providers.'
         : detail || 'Could not start Google sign-in. Please try again.')
+      setGoogleSetup(/provider is not enabled|unsupported provider/i.test(detail))
       setBusy(false)
     }
   }
@@ -55,6 +82,7 @@ export default function AuthView({ onSignedIn, setupError }) {
     setBusy(true)
     setError('')
     setMessage('')
+    setGoogleSetup(false)
     try {
       if (mode === 'forgot') {
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: appUrl })
@@ -94,13 +122,14 @@ export default function AuthView({ onSignedIn, setupError }) {
         <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" /></label>
         {mode !== 'forgot' && <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label>}
         {error && <p className="auth-error" role="alert">{error}</p>}
+        {googleSetup && googleSetupUrl && <a className="auth-setup-link" href={googleSetupUrl} target="_blank" rel="noreferrer">Open Supabase provider settings →</a>}
         {message && <p className="auth-message" role="status">{message}</p>}
         <button className="auth-submit" type="submit" disabled={busy || !supabase}>{busy ? 'Please wait…' : submitLabel}</button>
       </form>
       <div className="auth-links">
-        {mode === 'signin' && <button type="button" onClick={() => { setMode('forgot'); setError(''); setMessage('') }}>Forgot password?</button>}
-        {mode !== 'signin' && <button type="button" onClick={() => { setMode('signin'); setError(''); setMessage('') }}>Back to sign in</button>}
-        {mode === 'signin' && <button type="button" onClick={() => { setMode('signup'); setError(''); setMessage('') }}>Create an account</button>}
+        {mode === 'signin' && <button type="button" onClick={() => { setMode('forgot'); setError(''); setMessage(''); setGoogleSetup(false) }}>Forgot password?</button>}
+        {mode !== 'signin' && <button type="button" onClick={() => { setMode('signin'); setError(''); setMessage(''); setGoogleSetup(false) }}>Back to sign in</button>}
+        {mode === 'signin' && <button type="button" onClick={() => { setMode('signup'); setError(''); setMessage(''); setGoogleSetup(false) }}>Create an account</button>}
       </div>
     </section>
   </main>
