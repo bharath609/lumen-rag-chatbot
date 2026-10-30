@@ -207,6 +207,7 @@ function Icon({ name, size = 22 }) {
     chat: <><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H9l-5 4v-11Z" /><path d="M8.5 9.5h7M8.5 12.5h4.5" /></>,
     bolt: <><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2Z" /></>,
     shield: <><path d="M12 3 5 5.8v5.4c0 4.4 2.9 7.6 7 9.8 4.1-2.2 7-5.4 7-9.8V5.8L12 3Z" /><path d="m9 11.5 2.2 2.2L15.5 9.5" /></>,
+    user: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></>,
   }
   return <svg aria-hidden="true" className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{paths[name] || paths.spark}</svg>
 }
@@ -372,10 +373,35 @@ function EvidencePanel({ message, activeCite }) {
   </aside>
 }
 
-function Message({ message, id, focused, onFocus }) {
+function Message({ message, id, index, focused, onFocus }) {
   const isUser = message.role === 'user'
   const level = matchLevel(message.metrics?.top_score)
-  return <article className={`message ${isUser ? 'message-user' : 'message-assistant'} ${focused ? 'is-focused' : ''}`}><div className="message-meta"><span className={`avatar ${isUser ? 'avatar-user' : 'avatar-assistant'}`}>{isUser ? 'YOU' : 'LM'}</span><strong>{isUser ? 'You' : 'Lumora'}</strong><span className="message-time">{message.time || 'now'}</span>{message.demo && <span className="demo-answer-label">DEMO ANSWER</span>}</div><div className="message-body">{isUser ? message.content.split('\n').map((line, index) => <p key={`${line}-${index}`}>{line || '\u00a0'}</p>) : <AnswerText text={message.content} onCite={(n) => { onFocus?.(id, n); openCitation(`cite-${id}-${n}`) }} />}</div>{!isUser && message.citations?.length > 0 && <div className="answer-foot"><span className={`match-pill tone-${level.tone}`}>{level.label}</span><button type="button" className="inspect-btn" onClick={() => onFocus?.(id, null)}>Inspect {message.citations.length} {message.citations.length === 1 ? 'source' : 'sources'}<Icon name="chevron" size={16} /></button></div>}{!isUser && message.citations?.length > 0 && <div className="evidence-block"><div className="evidence-heading"><span><span className="evidence-bar" />Grounded evidence</span><span>{message.citations.length} sources</span></div><div className="citation-list">{message.citations.map((citation, index) => <CitationCard anchor={`cite-${id}-${citation.index || index + 1}`} citation={{ ...citation, index: citation.index || index + 1 }} key={`${citation.source}-${citation.page || citation.section || index}`} />)}</div>{message.metrics && <div className="metrics-row"><span><b>{message.metrics.used_chunks ?? message.metrics.used ?? 0}</b> chunks used</span><span><b>{message.metrics.top_score == null ? '—' : `${Math.round(Number(message.metrics.top_score) * 100)}%`}</b> top score</span><span><b>{message.metrics.context_chars ?? 0}</b> context chars</span></div>}</div>}</article>
+  return <article data-msg-index={index} className={`message ${isUser ? 'message-user' : 'message-assistant'} ${focused ? 'is-focused' : ''}`}><div className="message-meta"><span className={`avatar ${isUser ? 'avatar-user' : 'avatar-assistant'}`}>{isUser ? 'YOU' : 'LM'}</span><strong>{isUser ? 'You' : 'Lumora'}</strong><span className="message-time">{message.time || 'now'}</span>{message.demo && <span className="demo-answer-label">DEMO ANSWER</span>}</div><div className="message-body">{isUser ? message.content.split('\n').map((line, index) => <p key={`${line}-${index}`}>{line || '\u00a0'}</p>) : <AnswerText text={message.content} onCite={(n) => { onFocus?.(id, n); openCitation(`cite-${id}-${n}`) }} />}</div>{!isUser && message.citations?.length > 0 && <div className="answer-foot"><span className={`match-pill tone-${level.tone}`}>{level.label}</span><button type="button" className="inspect-btn" onClick={() => onFocus?.(id, null)}>Inspect {message.citations.length} {message.citations.length === 1 ? 'source' : 'sources'}<Icon name="chevron" size={16} /></button></div>}{!isUser && message.citations?.length > 0 && <div className="evidence-block"><div className="evidence-heading"><span><span className="evidence-bar" />Grounded evidence</span><span>{message.citations.length} sources</span></div><div className="citation-list">{message.citations.map((citation, index) => <CitationCard anchor={`cite-${id}-${citation.index || index + 1}`} citation={{ ...citation, index: citation.index || index + 1 }} key={`${citation.source}-${citation.page || citation.section || index}`} />)}</div>{message.metrics && <div className="metrics-row"><span><b>{message.metrics.used_chunks ?? message.metrics.used ?? 0}</b> chunks used</span><span><b>{message.metrics.top_score == null ? '—' : `${Math.round(Number(message.metrics.top_score) * 100)}%`}</b> top score</span><span><b>{message.metrics.context_chars ?? 0}</b> context chars</span></div>}</div>}</article>
+}
+
+function ConfirmDialog({ title, body, confirmLabel, cancelLabel = 'Cancel', tone = 'default', icon = 'alert', onConfirm, onCancel }) {
+  const cancelRef = useRef(null)
+  const cancelHandler = useRef(onCancel)
+  cancelHandler.current = onCancel
+
+  useEffect(() => {
+    const onKeyDown = (event) => { if (event.key === 'Escape') cancelHandler.current?.() }
+    document.addEventListener('keydown', onKeyDown)
+    cancelRef.current?.focus()
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+    <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+      <span className={`modal-icon ${tone}`}><Icon name={icon} size={26} /></span>
+      <h2 id="confirm-title">{title}</h2>
+      <p id="confirm-body">{body}</p>
+      <div className="modal-actions">
+        <button type="button" className="modal-cancel" onClick={onCancel} ref={cancelRef}>{cancelLabel}</button>
+        <button type="button" className={`modal-confirm ${tone}`} onClick={onConfirm}>{confirmLabel}</button>
+      </div>
+    </div>
+  </div>
 }
 
 function App() {
@@ -393,7 +419,9 @@ function App() {
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
-  const endRef = useRef(null)
+  const [dialog, setDialog] = useState(null)
+  const threadRef = useRef(null)
+  const pendingQuestionRef = useRef(null)
   const taRef = useRef(null)
   const [focus, setFocus] = useState({ index: null, cite: null })
 
@@ -411,7 +439,22 @@ function App() {
     setChunks(payload?.chunks ?? nextDocuments.reduce((sum, document) => sum + Number(document.chunk_count || 0), 0))
   }
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages, isLoading])
+  useEffect(() => {
+    const thread = threadRef.current
+    if (!thread) return
+    thread.scrollTo({ top: thread.scrollHeight, behavior: 'auto' })
+  }, [activeThreadId])
+
+  useEffect(() => {
+    const index = pendingQuestionRef.current
+    if (index == null) return
+    pendingQuestionRef.current = null
+    const thread = threadRef.current
+    if (!thread) return
+    const target = thread.querySelector(`[data-msg-index="${index}"]`)
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [messages])
+
   useEffect(() => { if (!question && taRef.current) taRef.current.style.height = 'auto' }, [question])
 
   useEffect(() => {
@@ -539,7 +582,8 @@ function App() {
   }
 
   async function handleClear() {
-    if (!documents.length || !window.confirm('Clear every indexed document and its saved chats?')) return
+    if (!documents.length) return
+    setDialog(null)
     setError('')
     try {
       if (isDemo) {
@@ -566,6 +610,7 @@ function App() {
     const threadDocument = existing ? existing.documentSource : (activeDocument || null)
     const historyPayload = [...baseMessages, userMessage].map((message) => ({ role: message.role, content: message.content }))
     let threadId = existing?.id || ''
+    pendingQuestionRef.current = baseMessages.length
 
     if (existing) {
       setThreads((current) => current.map((thread) => thread.id === existing.id ? { ...thread, messages: [...thread.messages, userMessage], updatedAt: now } : thread))
@@ -608,21 +653,38 @@ function App() {
   if (historyUserId !== userId) return <div className="checking-state"><span className="loader-ring" /><p>Loading your saved chats…</p></div>
 
   return <div className="app-shell">
-    <LibrarySidebar documents={documents} chunks={chunks} threads={threads} activeDocument={activeDocument} activeThreadId={activeThreadId} onSelectDocument={selectDocument} onSelectThread={openThread} onNewThread={startNewThread} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+    <LibrarySidebar documents={documents} chunks={chunks} threads={threads} activeDocument={activeDocument} activeThreadId={activeThreadId} onSelectDocument={selectDocument} onSelectThread={openThread} onNewThread={startNewThread} onUpload={handleUpload} onClear={() => setDialog('clear')} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
     <main className="chat-workspace">
-      <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong title={activeDocument || 'All documents'}>{activeDocument || 'All documents'}</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Private workspace'}</span><span className="account-email" title={session.user?.email}>{session.user?.email}</span><button type="button" className="new-chat" onClick={startNewThread}><Icon name="plus" size={20} /> New thread</button><button type="button" className="signout-button" onClick={() => supabase.auth.signOut()}>Sign out</button></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong title={activeDocument || 'All documents'}>{activeDocument || 'All documents'}</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Private workspace'}</span><span className="account-email" title={session.user?.email}>{session.user?.email}</span><button type="button" className="new-chat" onClick={startNewThread}><Icon name="plus" size={20} /> New thread</button><button type="button" className="signout-button" onClick={() => setDialog('signout')}>Sign out</button></div></header>
       <div className="chat-content">
-        <section className={`thread ${hasMessages ? 'has-messages' : ''}`} role="log" aria-label="Chat thread">
+        <section ref={threadRef} className={`thread ${hasMessages ? 'has-messages' : ''}`} role="log" aria-label="Chat thread">
           {!hasMessages && status !== 'checking' && <Welcome onPrompt={(prompt) => ask(prompt)} docCount={activeDocument ? 1 : documents.length} starters={buildStarters(documents, isDemo, activeDocument)} activeDocument={activeDocument} />}
           {status === 'checking' && <div className="checking-state"><span className="loader-ring" /><p>Connecting to your retrieval index…</p></div>}
-          {messages.map((message, index) => <Message message={message} id={index} focused={message === evidenceMessage} onFocus={(i, c) => setFocus({ index: i, cite: c })} key={`${activeThreadId || 'draft'}-${message.role}-${index}`} />)}
+          {messages.map((message, index) => <Message message={message} id={index} index={index} focused={message === evidenceMessage} onFocus={(i, c) => setFocus({ index: i, cite: c })} key={`${activeThreadId || 'draft'}-${message.role}-${index}`} />)}
           {isLoading && <div className="message message-assistant loading-message"><div className="message-meta"><span className="avatar avatar-assistant">LM</span><strong>Lumora</strong><span className="message-time">retrieving</span></div><div className="loading-bubble"><span /><span /><span /><em>Finding grounded passages…</em></div></div>}
-          <div ref={endRef} className="thread-end" />
+          <div className="thread-end" />
         </section>
         <div className="composer-area"><div className="composer-context"><span title={activeDocument || 'All documents'}><Icon name="book" size={20} /> {activeDocument ? `Searching ${activeDocument}` : `Searching ${documents.length} ${documents.length === 1 ? 'document' : 'documents'}`}</span><span className="context-divider" /><span><Icon name="check" size={18} /> Answers cite your sources</span></div>{error && (() => { const friendly = friendlyError(error); return <div className="error-state" role="alert"><span className="error-icon"><Icon name="alert" size={26} /></span><div className="error-copy"><strong>{friendly.title}</strong><p>{friendly.body}</p></div><button type="button" onClick={() => setError('')} aria-label="Dismiss error">×</button></div> })()}<form className="composer" onSubmit={(event) => { event.preventDefault(); ask() }}><textarea ref={taRef} value={question} onChange={(event) => { setQuestion(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 168)}px` }} onKeyDown={handleComposerKeyDown} placeholder={activeDocument ? `Ask about ${activeDocument}…` : 'Ask anything about your library…'} aria-label="Ask a question about your documents" rows="1" disabled={status === 'checking'} /><div className="composer-footer"><label className="attach-button" title="Upload documents"><input type="file" multiple accept={ACCEPTED_FORMATS} onChange={(event) => { if (event.target.files?.length) handleUpload(Array.from(event.target.files)) }} /><Icon name="plus" size={22} /><span>Source</span></label><span className="keyboard-hint"><kbd>shift</kbd> + <kbd>enter</kbd> for a new line</span><button className="send-button" type="submit" disabled={!question.trim() || isLoading || status === 'checking'} aria-label="Send question"><Icon name="send" size={24} /></button></div></form><p className="composer-note">Lumora can make mistakes. Verify important details against the cited passages.</p></div>
       </div>
     </main>
     <EvidencePanel message={evidenceMessage} activeCite={focus.cite} />
+    {dialog === 'clear' && <ConfirmDialog
+      title="Clear this library?"
+      body="This removes every indexed document and all saved chats about them for your account. This cannot be undone."
+      confirmLabel="Clear library"
+      tone="danger"
+      icon="trash"
+      onConfirm={handleClear}
+      onCancel={() => setDialog(null)}
+    />}
+    {dialog === 'signout' && <ConfirmDialog
+      title="Sign out of Lumora?"
+      body="You will be returned to the sign-in screen. Your saved chats stay in this browser and return when you sign in again."
+      confirmLabel="Sign out"
+      icon="user"
+      onConfirm={() => { setDialog(null); supabase.auth.signOut() }}
+      onCancel={() => setDialog(null)}
+    />}
   </div>
 }
 
