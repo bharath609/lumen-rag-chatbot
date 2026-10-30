@@ -156,7 +156,7 @@ function CitationCard({ citation, anchor }) {
   </details>
 }
 
-function LibrarySidebar({ documents, chunks, status, onUpload, onClear, isUploading, mobileOpen, setMobileOpen }) {
+function LibrarySidebar({ documents, chunks, onUpload, onClear, isUploading, mobileOpen, setMobileOpen }) {
   const [dragging, setDragging] = useState(false)
   const handleFiles = (fileList) => {
     const files = Array.from(fileList || [])
@@ -165,7 +165,6 @@ function LibrarySidebar({ documents, chunks, status, onUpload, onClear, isUpload
   }
   return <aside className={`library-sidebar ${mobileOpen ? 'sidebar-open' : ''}`} aria-label="Document library">
     <div className="sidebar-top"><Logo /><button className="icon-button mobile-close" type="button" onClick={() => setMobileOpen(false)} aria-label="Close library"><span aria-hidden="true">×</span></button></div>
-    <div className={`connection-badge ${status === 'connected' ? 'is-connected' : status === 'demo' ? 'is-demo' : 'is-checking'}`}><span className="connection-dot" /><span>{status === 'connected' ? 'API connected' : status === 'demo' ? 'Local demo mode' : 'Checking API'}</span><span className="badge-pulse">{status === 'connected' ? 'LIVE' : status === 'demo' ? 'DEMO' : 'WAIT'}</span></div>
     <div className="library-heading"><div><span className="eyebrow">Workspace</span><h1>Library</h1></div><span className="library-count">{documents.length}</span></div>
     <div className="library-stats"><div><strong>{documents.length}</strong><span>documents</span></div><div><strong>{chunks}</strong><span>chunks indexed</span></div></div>
     <label className={`dropzone ${dragging ? 'is-dragging' : ''} ${isUploading ? 'is-uploading' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); handleFiles(event.dataTransfer.files) }}>
@@ -396,7 +395,7 @@ function App() {
   if (!session) return <AuthView />
 
   return <div className="app-shell">
-    <LibrarySidebar documents={documents} chunks={chunks} status={status} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+    <LibrarySidebar documents={documents} chunks={chunks} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
     <main className="chat-workspace">
       <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong>Ask Lumora</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Private workspace'}</span><span className="account-email" title={session.user?.email}>{session.user?.email}</span><button type="button" className="new-chat" onClick={() => { setMessages([]); setError(''); setFocus({ index: null, cite: null }) }}><Icon name="plus" size={20} /> New thread</button><button type="button" className="signout-button" onClick={() => supabase.auth.signOut()}>Sign out</button></div></header>
       <div className="chat-content">
