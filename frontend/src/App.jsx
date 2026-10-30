@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { clearLibrary, getHealth, getLibrary, sendChat, uploadDocuments } from './api'
 import AuthView from './AuthView'
 import { supabase, supabaseConfigured } from './supabase'
@@ -24,8 +24,15 @@ const STARTERS = [
   { label: 'Compare the research', hint: 'Recurring themes across documents', prompt: 'What themes show up in the customer research?', icon: 'bolt' },
 ]
 
-function buildStarters(documents, isDemo) {
+function buildStarters(documents, isDemo, activeDocument) {
   if (isDemo) return STARTERS
+  if (activeDocument) {
+    return [
+      { label: `Summarize ${activeDocument}`, hint: 'The document’s key points, with citations', prompt: `Summarize ${activeDocument} and cite the passages you used.`, icon: 'doc' },
+      { label: 'Pull out the key facts', hint: 'Figures, dates and definitions in this document', prompt: `What are the most important facts, figures and definitions in ${activeDocument}?`, icon: 'bolt' },
+      { label: 'What does this document cover?', hint: 'A quick map of this source', prompt: `What topics does ${activeDocument} cover?`, icon: 'chat' },
+    ]
+  }
   const first = documents[0]?.source
   return [
     { label: first ? `Summarize ${first}` : 'Summarize my documents', hint: 'The key points, with citations', prompt: first ? `Summarize ${first} and cite the passages you used.` : 'Summarize my documents and cite the passages you used.', icon: 'doc' },
@@ -35,6 +42,94 @@ function buildStarters(documents, isDemo) {
 }
 
 const nowLabel = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+const EMPTY_MESSAGES = []
+
+const THREADS_STORAGE_PREFIX = 'lumora.threads.v1.'
+const MAX_SAVED_THREADS = 60
+const MAX_MESSAGES_PER_THREAD = 120
+
+function newThreadId() {
+  return `thread_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function makeThreadTitle(text) {
+  const title = String(text || '').trim().replace(/\s+/g, ' ')
+  return title.length > 90 ? `${title.slice(0, 87)}…` : title || 'Saved chat'
+}
+
+function formatThreadTime(value) {
+  const date = new Date(Number(value))
+  if (Number.isNaN(date.getTime())) return ''
+  const now = new Date()
+  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+function cleanThread(value) {
+  if (!value || typeof value !== 'object') return null
+  const messages = (Array.isArray(value.messages) ? value.messages : [])
+    .filter((message) => message && typeof message.content === 'string' && (message.role === 'user' || message.role === 'assistant'))
+    .slice(-MAX_MESSAGES_PER_THREAD)
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+      time: typeof message.time === 'string' ? message.time : '',
+      citations: Array.isArray(message.citations) ? message.citations : [],
+      metrics: message.metrics && typeof message.metrics === 'object' ? message.metrics : {},
+      demo: Boolean(message.demo),
+    }))
+  if (!messages.length) return null
+  const createdAt = Number(value.createdAt) || Date.now()
+  return {
+    id: typeof value.id === 'string' && value.id ? value.id : newThreadId(),
+    documentSource: typeof value.documentSource === 'string' && value.documentSource ? value.documentSource : null,
+    title: makeThreadTitle(value.title || messages.find((message) => message.role === 'user')?.content || 'Saved chat'),
+    createdAt,
+    updatedAt: Number(value.updatedAt) || createdAt,
+    messages,
+  }
+}
+
+function readThreadStore(userId) {
+  if (!userId || typeof window === 'undefined') return { threads: [], activeThreadId: null, activeDocument: null }
+  try {
+    const raw = window.localStorage.getItem(`${THREADS_STORAGE_PREFIX}${userId}`)
+    if (!raw) return { threads: [], activeThreadId: null, activeDocument: null }
+    const parsed = JSON.parse(raw)
+    const saved = Array.isArray(parsed) ? parsed : parsed?.threads
+    const threads = (Array.isArray(saved) ? saved : [])
+      .map(cleanThread)
+      .filter(Boolean)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_SAVED_THREADS)
+    const activeThread = threads.find((thread) => thread.id === parsed?.activeThreadId) || null
+    return {
+      threads,
+      activeThreadId: activeThread?.id || null,
+      activeDocument: activeThread ? activeThread.documentSource : (typeof parsed?.activeDocument === 'string' ? parsed.activeDocument : null),
+    }
+  } catch {
+    return { threads: [], activeThreadId: null, activeDocument: null }
+  }
+}
+
+function writeThreadStore(userId, threads, activeThreadId, activeDocument) {
+  if (!userId || typeof window === 'undefined') return
+  try {
+    const trimmed = [...threads]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_SAVED_THREADS)
+      .map((thread) => ({ ...thread, messages: thread.messages.slice(-MAX_MESSAGES_PER_THREAD) }))
+    window.localStorage.setItem(`${THREADS_STORAGE_PREFIX}${userId}`, JSON.stringify({
+      version: 1,
+      threads: trimmed,
+      activeThreadId,
+      activeDocument,
+    }))
+  } catch {
+    // Saved chats are a convenience; a full or blocked storage should not break chat.
+  }
+}
 
 function openCitation(anchor) {
   const el = document.getElementById(anchor)
@@ -156,13 +251,30 @@ function CitationCard({ citation, anchor }) {
   </details>
 }
 
-function LibrarySidebar({ documents, chunks, onUpload, onClear, isUploading, mobileOpen, setMobileOpen }) {
+function LibrarySidebar({ documents, chunks, threads, activeDocument, activeThreadId, onSelectDocument, onSelectThread, onNewThread, onUpload, onClear, isUploading, mobileOpen, setMobileOpen }) {
   const [dragging, setDragging] = useState(false)
   const handleFiles = (fileList) => {
     const files = Array.from(fileList || [])
     if (files.length) onUpload(files)
     setDragging(false)
   }
+  const threadsFor = (source) => threads
+    .filter((thread) => (thread.documentSource || null) === source)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+  const libraryThreads = threadsFor(null)
+
+  const threadList = (source, savedThreads) => {
+    if (activeDocument !== source || !savedThreads.length) return null
+    return <div className="doc-chats">
+      <div className="doc-chats-head"><span>Saved chats</span><button type="button" onClick={onNewThread}>+ New</button></div>
+      {activeThreadId === null && <div className="doc-chat is-active"><span className="doc-chat-title">New chat</span><span className="doc-chat-meta">Start typing below</span></div>}
+      {savedThreads.map((thread) => <button type="button" className={`doc-chat ${thread.id === activeThreadId ? 'is-active' : ''}`} onClick={() => onSelectThread(thread.id)} key={thread.id}>
+        <span className="doc-chat-title" title={thread.title}>{thread.title}</span>
+        <span className="doc-chat-meta">{formatThreadTime(thread.updatedAt)} · {thread.messages.length} {thread.messages.length === 1 ? 'message' : 'messages'}</span>
+      </button>)}
+    </div>
+  }
+
   return <aside className={`library-sidebar ${mobileOpen ? 'sidebar-open' : ''}`} aria-label="Document library">
     <div className="sidebar-top"><Logo /><button className="icon-button mobile-close" type="button" onClick={() => setMobileOpen(false)} aria-label="Close library"><span aria-hidden="true">×</span></button></div>
     <div className="library-heading"><div><span className="eyebrow">Workspace</span><h1>Library</h1></div><span className="library-count">{documents.length}</span></div>
@@ -171,21 +283,42 @@ function LibrarySidebar({ documents, chunks, onUpload, onClear, isUploading, mob
       <input type="file" multiple accept={ACCEPTED_FORMATS} onChange={(event) => handleFiles(event.target.files)} disabled={isUploading} />
       <span className="dropzone-icon"><Icon name={isUploading ? 'spark' : 'upload'} size={26} /></span><strong>{isUploading ? 'Indexing documents…' : 'Drop files to index'}</strong><span>{isUploading ? 'Building searchable chunks' : 'or browse from your device'}</span><small>{ACCEPTED_LABEL}</small>
     </label>
-    <div className="documents-header"><span>Indexed documents</span><span className="document-rule" /></div>
-    <div className="document-list">{documents.length ? documents.map((document) => <div className="document-row" key={`${document.source}-${document.updated_at || document.created_at || ''}`}><FileIcon type={fileType(document.source)} /><div className="document-info"><strong title={document.source}>{document.source}</strong><span>{document.chunk_count || 0} chunks <i>·</i> {formatBytes(document.size)}</span></div><span className="indexed-dot" title="Indexed" /></div>) : <div className="empty-library"><Icon name="book" size={26} /><p>Your library is ready for its first source.</p></div>}</div>
+    <div className="documents-header"><span>Chats by document</span><span className="document-rule" /></div>
+    <div className="document-list">
+      <div className={`document-entry ${activeDocument === null ? 'is-open' : ''}`}>
+        <button type="button" className={`document-row all-docs-row ${activeDocument === null ? 'is-active' : ''}`} onClick={() => onSelectDocument(null)}>
+          <span className="all-docs-icon"><Icon name="book" size={18} /></span>
+          <div className="document-info"><strong>All documents</strong><span>{documents.length} {documents.length === 1 ? 'source' : 'sources'}{libraryThreads.length ? ` · ${libraryThreads.length} ${libraryThreads.length === 1 ? 'chat' : 'chats'}` : ''}</span></div>
+          <Icon name="chevron" size={16} />
+        </button>
+        {threadList(null, libraryThreads)}
+      </div>
+      {documents.length ? documents.map((document) => {
+        const docThreads = threadsFor(document.source)
+        const selected = activeDocument === document.source
+        return <div className={`document-entry ${selected ? 'is-open' : ''}`} key={`${document.source}-${document.updated_at || document.created_at || ''}`}>
+          <button type="button" className={`document-row ${selected ? 'is-active' : ''}`} onClick={() => onSelectDocument(document.source)}>
+            <FileIcon type={fileType(document.source)} />
+            <div className="document-info"><strong title={document.source}>{document.source}</strong><span>{document.chunk_count || 0} chunks <i>·</i> {formatBytes(document.size)}{docThreads.length ? <> <i>·</i> {docThreads.length} {docThreads.length === 1 ? 'chat' : 'chats'}</> : null}</span></div>
+            <Icon name="chevron" size={16} />
+          </button>
+          {threadList(document.source, docThreads)}
+        </div>
+      }) : <div className="empty-library"><Icon name="book" size={26} /><p>Your library is ready for its first source.</p></div>}
+    </div>
     <button className="clear-button" type="button" onClick={onClear} disabled={!documents.length}><Icon name="trash" size={20} /> Clear library</button>
     <div className="sidebar-footer"><span>GROUNDED · CITED</span><span className="footer-line" /><span>v1.0</span></div>
   </aside>
 }
 
-function Welcome({ onPrompt, docCount, starters }) {
+function Welcome({ onPrompt, docCount, starters, activeDocument }) {
   return <div className="welcome-state">
     <div className="welcome-hero">
       <div className="welcome-orbit"><span /><span /><span /><Icon name="spark" size={36} /></div>
-      <div className="welcome-copy"><span className="eyebrow eyebrow-pill"><Icon name="shield" size={18} /> Grounded answers only</span><h2>Ask your library<br /><em>what it knows.</em></h2><p>Lumora retrieves the right passages, grounds every response in your sources, and keeps the trail visible.</p></div>
+      <div className="welcome-copy"><span className="eyebrow eyebrow-pill"><Icon name="shield" size={18} /> Grounded answers only</span><h2>{activeDocument ? <>Ask this document<br /><em>what it knows.</em></> : <>Ask your library<br /><em>what it knows.</em></>}</h2><p>{activeDocument ? `This thread searches only ${activeDocument}. Your earlier chats about it stay in the sidebar.` : 'Lumora retrieves the right passages, grounds every response in your sources, and keeps the trail visible.'}</p></div>
     </div>
     <div className="welcome-stats">
-      <div><Icon name="doc" size={24} /><div><strong>{docCount}</strong><span>documents indexed</span></div></div>
+      <div><Icon name="doc" size={24} /><div><strong>{docCount}</strong><span>{activeDocument ? 'document in this chat' : 'documents indexed'}</span></div></div>
       <div><Icon name="check" size={24} /><div><strong>Cited</strong><span>every answer links evidence</span></div></div>
       <div><Icon name="bolt" size={24} /><div><strong>Your index</strong><span>built only from your files</span></div></div>
     </div>
@@ -251,7 +384,10 @@ function App() {
   const [status, setStatus] = useState('checking')
   const [documents, setDocuments] = useState([])
   const [chunks, setChunks] = useState(0)
-  const [messages, setMessages] = useState([])
+  const [threads, setThreads] = useState([])
+  const [activeThreadId, setActiveThreadId] = useState(null)
+  const [activeDocument, setActiveDocument] = useState(null)
+  const [historyUserId, setHistoryUserId] = useState('')
   const [question, setQuestion] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
@@ -262,9 +398,11 @@ function App() {
   const [focus, setFocus] = useState({ index: null, cite: null })
 
   const isDemo = false
+  const userId = session?.user?.id || ''
   const accessToken = session?.access_token || ''
+  const activeThread = threads.find((thread) => thread.id === activeThreadId) || null
+  const messages = activeThread?.messages || EMPTY_MESSAGES
   const hasMessages = messages.length > 0
-  const history = useMemo(() => messages.map((message) => ({ role: message.role, content: message.content })), [messages])
   const evidenceMessage = focus.index != null ? messages[focus.index] : [...messages].reverse().find((item) => item.role === 'assistant' && item.citations?.length)
 
   const applyLibrary = (payload) => {
@@ -295,6 +433,27 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const id = session?.user?.id || ''
+    if (!id) {
+      setThreads([])
+      setActiveThreadId(null)
+      setActiveDocument(null)
+      setHistoryUserId('')
+      return
+    }
+    const saved = readThreadStore(id)
+    setThreads(saved.threads)
+    setActiveThreadId(saved.activeThreadId)
+    setActiveDocument(saved.activeDocument)
+    setHistoryUserId(id)
+  }, [session?.user?.id])
+
+  useEffect(() => {
+    if (!userId || historyUserId !== userId) return
+    writeThreadStore(userId, threads, activeThreadId, activeDocument)
+  }, [threads, activeThreadId, activeDocument, userId, historyUserId])
+
+  useEffect(() => {
     if (!session) return undefined
     let mounted = true
     setStatus('checking')
@@ -310,6 +469,34 @@ function App() {
     })
     return () => { mounted = false }
   }, [session, accessToken])
+
+  function selectDocument(source) {
+    setError('')
+    setFocus({ index: null, cite: null })
+    setActiveDocument(source)
+    const recent = threads
+      .filter((thread) => (thread.documentSource || null) === source)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    setActiveThreadId(recent?.id || null)
+    setMobileOpen(false)
+  }
+
+  function openThread(threadId) {
+    const thread = threads.find((item) => item.id === threadId)
+    if (!thread) return
+    setActiveThreadId(thread.id)
+    setActiveDocument(thread.documentSource || null)
+    setError('')
+    setFocus({ index: null, cite: null })
+    setMobileOpen(false)
+  }
+
+  function startNewThread() {
+    setActiveThreadId(null)
+    setError('')
+    setFocus({ index: null, cite: null })
+    setMobileOpen(false)
+  }
 
   async function handleUpload(files) {
     setError('')
@@ -352,13 +539,16 @@ function App() {
   }
 
   async function handleClear() {
-    if (!documents.length || !window.confirm('Clear every indexed document from this library?')) return
+    if (!documents.length || !window.confirm('Clear every indexed document and its saved chats?')) return
     setError('')
     try {
       if (isDemo) {
         setDocuments([])
         setChunks(0)
       } else applyLibrary(await clearLibrary(accessToken))
+      setThreads([])
+      setActiveThreadId(null)
+      setActiveDocument(null)
     } catch (clearError) {
       setError(clearError.message || 'Could not clear the library.')
     }
@@ -369,12 +559,34 @@ function App() {
     if (!trimmed || isLoading) return
     setQuestion('')
     setError('')
+    const now = Date.now()
     const userMessage = { role: 'user', content: trimmed, time: nowLabel() }
-    setMessages((current) => [...current, userMessage])
+    const existing = activeThread
+    const baseMessages = existing?.messages || EMPTY_MESSAGES
+    const threadDocument = existing ? existing.documentSource : (activeDocument || null)
+    const historyPayload = [...baseMessages, userMessage].map((message) => ({ role: message.role, content: message.content }))
+    let threadId = existing?.id || ''
+
+    if (existing) {
+      setThreads((current) => current.map((thread) => thread.id === existing.id ? { ...thread, messages: [...thread.messages, userMessage], updatedAt: now } : thread))
+    } else {
+      threadId = newThreadId()
+      setThreads((current) => [{
+        id: threadId,
+        documentSource: threadDocument,
+        title: makeThreadTitle(trimmed),
+        createdAt: now,
+        updatedAt: now,
+        messages: [userMessage],
+      }, ...current])
+      setActiveThreadId(threadId)
+    }
+
     setIsLoading(true)
     try {
-      const response = await sendChat(trimmed, history, null, accessToken)
-      setMessages((current) => [...current, { role: 'assistant', content: response.answer || 'I could not generate an answer.', citations: response.citations || response.sources || [], metrics: response.metrics || {}, demo: isDemo, time: nowLabel() }])
+      const response = await sendChat(trimmed, historyPayload, threadDocument ? [threadDocument] : null, accessToken)
+      const assistantMessage = { role: 'assistant', content: response.answer || 'I could not generate an answer.', citations: response.citations || response.sources || [], metrics: response.metrics || {}, demo: isDemo, time: nowLabel() }
+      setThreads((current) => current.map((thread) => thread.id === threadId ? { ...thread, messages: [...thread.messages, assistantMessage], updatedAt: Date.now() } : thread))
       setFocus({ index: null, cite: null })
     } catch (chatError) {
       setError(chatError.message || 'The retrieval service could not answer. Try again.')
@@ -393,20 +605,21 @@ function App() {
   if (!authReady) return <div className="checking-state"><span className="loader-ring" /><p>Checking your session…</p></div>
   if (!supabaseConfigured) return <AuthView setupError="Authentication is not configured. Add the Supabase frontend variables before using Lumora." />
   if (!session) return <AuthView />
+  if (historyUserId !== userId) return <div className="checking-state"><span className="loader-ring" /><p>Loading your saved chats…</p></div>
 
   return <div className="app-shell">
-    <LibrarySidebar documents={documents} chunks={chunks} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+    <LibrarySidebar documents={documents} chunks={chunks} threads={threads} activeDocument={activeDocument} activeThreadId={activeThreadId} onSelectDocument={selectDocument} onSelectThread={openThread} onNewThread={startNewThread} onUpload={handleUpload} onClear={handleClear} isUploading={isUploading} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
     <main className="chat-workspace">
-      <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong>Ask Lumora</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Private workspace'}</span><span className="account-email" title={session.user?.email}>{session.user?.email}</span><button type="button" className="new-chat" onClick={() => { setMessages([]); setError(''); setFocus({ index: null, cite: null }) }}><Icon name="plus" size={20} /> New thread</button><button type="button" className="signout-button" onClick={() => supabase.auth.signOut()}>Sign out</button></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open document library"><Icon name="menu" size={26} /></button><div className="breadcrumb"><span className="crumb-badge"><Icon name="spark" size={20} /></span><span>Workspace</span><b>/</b><strong title={activeDocument || 'All documents'}>{activeDocument || 'All documents'}</strong></div><div className="topbar-right"><span className={`retrieval-label ${isDemo ? 'is-warn' : ''}`}><span className="mini-pulse" />{isDemo ? 'Demo mode — API offline' : 'Private workspace'}</span><span className="account-email" title={session.user?.email}>{session.user?.email}</span><button type="button" className="new-chat" onClick={startNewThread}><Icon name="plus" size={20} /> New thread</button><button type="button" className="signout-button" onClick={() => supabase.auth.signOut()}>Sign out</button></div></header>
       <div className="chat-content">
         <section className={`thread ${hasMessages ? 'has-messages' : ''}`} role="log" aria-label="Chat thread">
-          {!hasMessages && status !== 'checking' && <Welcome onPrompt={(prompt) => ask(prompt)} docCount={documents.length} starters={buildStarters(documents, isDemo)} />}
+          {!hasMessages && status !== 'checking' && <Welcome onPrompt={(prompt) => ask(prompt)} docCount={activeDocument ? 1 : documents.length} starters={buildStarters(documents, isDemo, activeDocument)} activeDocument={activeDocument} />}
           {status === 'checking' && <div className="checking-state"><span className="loader-ring" /><p>Connecting to your retrieval index…</p></div>}
-          {messages.map((message, index) => <Message message={message} id={index} focused={message === evidenceMessage} onFocus={(i, c) => setFocus({ index: i, cite: c })} key={`${message.role}-${index}`} />)}
+          {messages.map((message, index) => <Message message={message} id={index} focused={message === evidenceMessage} onFocus={(i, c) => setFocus({ index: i, cite: c })} key={`${activeThreadId || 'draft'}-${message.role}-${index}`} />)}
           {isLoading && <div className="message message-assistant loading-message"><div className="message-meta"><span className="avatar avatar-assistant">LM</span><strong>Lumora</strong><span className="message-time">retrieving</span></div><div className="loading-bubble"><span /><span /><span /><em>Finding grounded passages…</em></div></div>}
           <div ref={endRef} className="thread-end" />
         </section>
-        <div className="composer-area"><div className="composer-context"><span><Icon name="book" size={20} /> Searching {documents.length} {documents.length === 1 ? 'document' : 'documents'}</span><span className="context-divider" /><span><Icon name="check" size={18} /> Answers cite your sources</span></div>{error && (() => { const friendly = friendlyError(error); return <div className="error-state" role="alert"><span className="error-icon"><Icon name="alert" size={26} /></span><div className="error-copy"><strong>{friendly.title}</strong><p>{friendly.body}</p></div><button type="button" onClick={() => setError('')} aria-label="Dismiss error">×</button></div> })()}<form className="composer" onSubmit={(event) => { event.preventDefault(); ask() }}><textarea ref={taRef} value={question} onChange={(event) => { setQuestion(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 168)}px` }} onKeyDown={handleComposerKeyDown} placeholder="Ask anything about your library…" aria-label="Ask a question about your documents" rows="1" disabled={status === 'checking'} /><div className="composer-footer"><label className="attach-button" title="Upload documents"><input type="file" multiple accept={ACCEPTED_FORMATS} onChange={(event) => { if (event.target.files?.length) handleUpload(Array.from(event.target.files)) }} /><Icon name="plus" size={22} /><span>Source</span></label><span className="keyboard-hint"><kbd>shift</kbd> + <kbd>enter</kbd> for a new line</span><button className="send-button" type="submit" disabled={!question.trim() || isLoading || status === 'checking'} aria-label="Send question"><Icon name="send" size={24} /></button></div></form><p className="composer-note">Lumora can make mistakes. Verify important details against the cited passages.</p></div>
+        <div className="composer-area"><div className="composer-context"><span title={activeDocument || 'All documents'}><Icon name="book" size={20} /> {activeDocument ? `Searching ${activeDocument}` : `Searching ${documents.length} ${documents.length === 1 ? 'document' : 'documents'}`}</span><span className="context-divider" /><span><Icon name="check" size={18} /> Answers cite your sources</span></div>{error && (() => { const friendly = friendlyError(error); return <div className="error-state" role="alert"><span className="error-icon"><Icon name="alert" size={26} /></span><div className="error-copy"><strong>{friendly.title}</strong><p>{friendly.body}</p></div><button type="button" onClick={() => setError('')} aria-label="Dismiss error">×</button></div> })()}<form className="composer" onSubmit={(event) => { event.preventDefault(); ask() }}><textarea ref={taRef} value={question} onChange={(event) => { setQuestion(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 168)}px` }} onKeyDown={handleComposerKeyDown} placeholder={activeDocument ? `Ask about ${activeDocument}…` : 'Ask anything about your library…'} aria-label="Ask a question about your documents" rows="1" disabled={status === 'checking'} /><div className="composer-footer"><label className="attach-button" title="Upload documents"><input type="file" multiple accept={ACCEPTED_FORMATS} onChange={(event) => { if (event.target.files?.length) handleUpload(Array.from(event.target.files)) }} /><Icon name="plus" size={22} /><span>Source</span></label><span className="keyboard-hint"><kbd>shift</kbd> + <kbd>enter</kbd> for a new line</span><button className="send-button" type="submit" disabled={!question.trim() || isLoading || status === 'checking'} aria-label="Send question"><Icon name="send" size={24} /></button></div></form><p className="composer-note">Lumora can make mistakes. Verify important details against the cited passages.</p></div>
       </div>
     </main>
     <EvidencePanel message={evidenceMessage} activeCite={focus.cite} />
